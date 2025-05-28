@@ -1,0 +1,8 @@
+# file: .gitignore
+node_modules
+.env
+package-lock.json
+package.json
+credentials
+credentials/fir-realtimekotlin-bb7e1-firebase-adminsdk-2b194-00e11282c4.json
+credentials/vibrant-period-457006-b5-a3522b826a94.json
