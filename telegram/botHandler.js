@@ -1,3 +1,4 @@
+//inisialisasi bot Telegram
 const TelegramBot = require("node-telegram-bot-api");
 const { handleTelegramCommand } = require("../logic/commandHandler");
 const { setBotAndChatId } = require("./telegramUtils");
@@ -12,7 +13,10 @@ if (!ENV_CHAT_ID) {
   throw new Error("Telegram chat id tidak ditemukan. Pastikan TELEGRAM_CHAT_ID diatur di environment variables.");
 }
 
+// ...existing code...
+
 const bot = new TelegramBot(TOKEN, { polling: true });
+const chatId = ENV_CHAT_ID; // Ambil dari env
 
 async function initTelegramBot() {
   bot.on("message", async (msg) => {
@@ -24,6 +28,7 @@ async function initTelegramBot() {
   });
 }
 
+module.exports = { initTelegramBot, bot, chatId };
 // Fungsi untuk mengirim pesan ke Telegram tanpa perlu memasukkan chatId
 // async function sendTelegramMessage(message) {
 //   if (!globalChatId) {
@@ -84,4 +89,4 @@ async function initTelegramBot() {
 //   });
 // }
 
-module.exports = { initTelegramBot};
+//module.exports = { initTelegramBot,bot,chatId};

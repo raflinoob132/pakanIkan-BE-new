@@ -1,3 +1,4 @@
+//fungsi dasar telegram
 let botInstance = null;
 let chatIdInstance = null;
 const { db } = require("../config/firebase");

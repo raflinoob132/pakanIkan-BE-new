@@ -31,11 +31,12 @@ async function checkSecurity() {
       const pesan = `Ancaman terdeteksi di ${sensor} (jarak: ${jarak}). Menggerakkan servo dengan command ${servoCommand}.`;
       console.log(pesan);
       await moveServoAndTakePhoto(servoCommand, "keamanan");
-      await sendTelegramMessage(pesan); // Kirim ke Telegram
+      await sendTelegramMessage(`Ancaman terdeteksi di ${sensor}. Proses pengambilan gambar dilakukan`); // Kirim ke Telegram
       await db.ref(`AncamanKeamananAktif/${sensor}`).set(true);
     } else if (jarak >= 10 && flagAktif) {
       await db.ref(`AncamanKeamananAktif/${sensor}`).set(false);
       console.log(`Ancaman di ${sensor} sudah pergi, flag direset.`);
+      await sendTelegramMessage(`Ancaman di ${sensor} sudah pergi.`); // Kirim ke Telegram
     }
   }
 

@@ -1,3 +1,20 @@
+const sharp = require('sharp');
+
+// Pastikan bot dan chatId di-import atau di-passing ke fungsi ini
+
+// Fungsi murni untuk kirim foto ke Telegram
+async function sendSecurityPhotoToTelegram(buffer, bot, chatId) {
+  // Putar 180 derajat menggunakan sharp
+  const rotatedBuffer = await sharp(buffer)
+    .rotate(180)
+    .jpeg({ quality: 80 })
+    .toBuffer();
+
+  // Kirim ke Telegram
+  await bot.sendPhoto(chatId, rotatedBuffer, { caption: 'Foto keamanan terbaru.' });
+}
+
+module.exports = { sendSecurityPhotoToTelegram };
 // const fs = require('fs');
 // const path = require('path');
 
@@ -27,30 +44,42 @@
 // };
 
 // module.exports = { uploadSecurityPhotoToLocal };
-const cloudinary = require('cloudinary').v2;
+// const cloudinary = require('cloudinary').v2;
+// const sharp = require('sharp');
 
-cloudinary.config({
-  cloud_name: 'dn1b60nhb',
-  api_key: '974149127748847',
-  api_secret: 'u_1MbxouXkih9M4NgPs0pBlUeUQ',
-});
+// // Konfigurasi Cloudinary
+// cloudinary.config({
+//   cloud_name: 'dn1b60nhb',
+//   api_key: '974149127748847',
+//   api_secret: 'u_1MbxouXkih9M4NgPs0pBlUeUQ',
+// });
 
-const uploadSecurityPhotoToCloudinary = async (req, res) => {
-  try {
-    const buffer = req.body;
-    const base64Str = buffer.toString('base64');
-    const dataUri = `data:image/jpeg;base64,${base64Str}`;
+// // Fungsi upload ke Cloudinary dengan rotasi 180 derajat
+// const uploadSecurityPhotoToCloudinary = async (req, res) => {
+//   try {
+//     const buffer = req.body; // Buffer dari ESP32-CAM
 
-    const result = await cloudinary.uploader.upload(dataUri, {
-      folder: 'securityPhoto'
-    });
+//     // Putar 180 derajat menggunakan sharp
+//     const rotatedBuffer = await sharp(buffer)
+//       .rotate(180)
+//       .jpeg({ quality: 80 }) // Optional: kompresi ringan
+//       .toBuffer();
 
-    console.log('Uploaded to Cloudinary:', result.secure_url);
-    res.status(200).json({ success: true, url: result.secure_url });
-  } catch (err) {
-    console.error('Upload to Cloudinary failed:', err);
-    res.status(500).send('Upload failed');
-  }
-};
+//     // Ubah menjadi Data URI (base64) agar bisa diupload ke Cloudinary
+//     const base64Str = rotatedBuffer.toString('base64');
+//     const dataUri = `data:image/jpeg;base64,${base64Str}`;
 
-module.exports = { uploadSecurityPhotoToCloudinary };
+//     // Upload ke folder "securityPhoto"
+//     const result = await cloudinary.uploader.upload(dataUri, {
+//       folder: 'securityPhoto',
+//     });
+
+//     console.log('Uploaded to Cloudinary:', result.secure_url);
+//     res.status(200).json({ success: true, url: result.secure_url });
+//   } catch (err) {
+//     console.error('Upload to Cloudinary failed:', err);
+//     res.status(500).send('Upload failed');
+//   }
+// };
+
+// module.exports = { uploadSecurityPhotoToCloudinary };
