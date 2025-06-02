@@ -1,25 +1,22 @@
 const { exec } = require('child_process');
-const axios = require('axios');
 const fs = require('fs');
-const {sendTelegramImage} = require('../telegram/telegramUtils');
-const { Storage } = require('@google-cloud/storage');
-const {bucket}= require('../config/storage');
+const { sendTelegramImage } = require('../telegram/telegramUtils');
+const { bucket } = require('../config/storage');
 const path = require('path');
 
 // Fungsi untuk mendeteksi objek menggunakan YOLOv8 dengan PyTorch
 async function processImage(buffer, fileName) {
-  // Cek apakah model perlu diunduh terlebih dahulu
-  const modelBuffer = await loadModelFromGCS(); // Mengunduh model dari GCS
-
-  // Simpan buffer model ke file sementara
-  const modelPath = path.join(__dirname, 'temp_model.pth');
+  // Download model dari GCS
+  const modelBuffer = await loadModelFromGCS();
+  const modelPath = path.join(__dirname, 'model_pakan-ikan-akhir.pt');
   fs.writeFileSync(modelPath, modelBuffer);
 
-  // DEBUG: Cek argumen yang akan dikirim ke Python
-  console.log(`[DEBUG] Akan menjalankan: python detect_objects.py ${fileName} ${modelPath}`);
+  // Gunakan path GCS untuk gambar
+  const gcsImagePath = `gs://pakan-ikan123/${fileName}`;
+  console.log(`[DEBUG] Akan menjalankan: python detect_objects.py "${gcsImagePath}" "${modelPath}"`);
 
   return new Promise((resolve, reject) => {
-    exec(`python detect_objects.py ${fileName} model_pakan-ikan-akhir.pth`, async (err, stdout, stderr) => {
+    exec(`python detect_objects.py "${gcsImagePath}" "${modelPath}"`, async (err, stdout, stderr) => {
       if (err) {
         console.error('[DEBUG] Deteksi gagal:', stderr);
         return reject(err);
@@ -27,11 +24,18 @@ async function processImage(buffer, fileName) {
 
       console.log('[DEBUG] Hasil deteksi dari Python:', stdout);
 
+      // Ambil hanya bagian JSON dari output Python
+      const jsonMatch = stdout.match(/\[\s*{[\s\S]*}\s*\]/);
+      if (!jsonMatch) {
+        console.error('[DEBUG] Tidak menemukan JSON pada output:', stdout);
+        return reject(new Error('No JSON found in Python output'));
+      }
+
       let detectedFishFoodCount = 0;
       try {
-        detectedFishFoodCount = countFishFood(stdout);
+        detectedFishFoodCount = countFishFood(jsonMatch[0]);
       } catch (parseErr) {
-        console.error('[DEBUG] Gagal parsing hasil deteksi:', parseErr, stdout);
+        console.error('[DEBUG] Gagal parsing hasil deteksi:', parseErr, jsonMatch[0]);
         return reject(parseErr);
       }
 
@@ -42,9 +46,7 @@ async function processImage(buffer, fileName) {
         makananHabis = true;
       }
 
-      // DEBUG: Info sebelum kirim ke Telegram
-      console.log(`[DEBUG] Akan kirim ke Telegram: makananHabis=${makananHabis}, count=${detectedFishFoodCount}`);
-
+      // Kirim hasil ke Telegram
       try {
         await sendTelegramImage(
           `https://storage.googleapis.com/pakan-ikan123/${fileName}`,
@@ -60,7 +62,7 @@ async function processImage(buffer, fileName) {
 }
 
 // Fungsi untuk memuat model YOLOv8 langsung dari GCS
-async function loadModelFromGCS(modelFileName = 'model_pakan-ikan-akhir.pth') {
+async function loadModelFromGCS(modelFileName = 'model_pakan-ikan-akhir.pt') {
   const { Readable } = require('stream');
   try {
     console.log(`[DEBUG] Mulai download model dari GCS: ${modelFileName}`);
@@ -75,7 +77,6 @@ async function loadModelFromGCS(modelFileName = 'model_pakan-ikan-akhir.pth') {
       fileStream.on('end', () => {
         const modelBuffer = Buffer.concat(chunks);
         console.log(`[DEBUG] Model berhasil di-download, total size: ${modelBuffer.length}`);
-        // Tidak bisa torch.load di Node.js, return buffer saja
         resolve(modelBuffer);
       });
       fileStream.on('error', (err) => {
@@ -91,19 +92,17 @@ async function loadModelFromGCS(modelFileName = 'model_pakan-ikan-akhir.pth') {
 
 // Fungsi untuk menghitung jumlah objek "pakan ikan" yang terdeteksi
 function countFishFood(detectedObjects) {
-  // Misalnya, kita asumsikan objek "pakan ikan" memiliki label tertentu, seperti "fish_food"
-  // Anda bisa mengganti kode ini untuk menyesuaikan dengan hasil keluaran model YOLOv8
-  const objects = JSON.parse(detectedObjects);  // Misalnya deteksi menghasilkan JSON
+  // Misal deteksi menghasilkan JSON array
+  const objects = JSON.parse(detectedObjects);
   let fishFoodCount = 0;
-  
   objects.forEach(obj => {
-    if (obj.label === 'pakan_ikan') {  // Ganti 'fish_food' sesuai dengan label yang relevan
+    if (obj.name === 'pakan_ikan') { // Ganti label sesuai model Anda
       fishFoodCount += 1;
     }
   });
-
   return fishFoodCount;
 }
+
 module.exports = {
   processImage,
   loadModelFromGCS,

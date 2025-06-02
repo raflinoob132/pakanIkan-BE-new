@@ -30,6 +30,8 @@ setInterval(async () => {
   }
 }, 40 * 1000);
 app.post("/uploadFood", express.raw({ type: "image/jpeg", limit: "5mb" }), uploadFishFoodImageToGCS);
+
+
 //app.post("/uploadSecurity", express.raw({ type: "image/jpeg", limit: "5mb" }), sendSecurityPhotoToTelegram);
 app.post('/sendSecurity', express.raw({ type: 'image/jpeg', limit: '5mb' }), async (req, res) => {
   try {

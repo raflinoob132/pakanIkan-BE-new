@@ -17,7 +17,7 @@ async function executeFeeding(kolam, jadwalKey) {
       break;
     case "kolam2":
       motorKey = "motorB";
-      servoCommand = "0,100";
+      servoCommand = "180,20";
       break;
     default:
       return;

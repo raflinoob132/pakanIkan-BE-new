@@ -11,7 +11,7 @@ async function sendSecurityPhotoToTelegram(buffer, bot, chatId) {
     .toBuffer();
 
   // Kirim ke Telegram
-  await bot.sendPhoto(chatId, rotatedBuffer, { caption: 'Foto keamanan terbaru.' });
+  await bot.sendPhoto(chatId, rotatedBuffer, { caption: 'Foto terbaru.' });
 }
 
 module.exports = { sendSecurityPhotoToTelegram };
