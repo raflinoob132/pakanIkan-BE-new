@@ -12,14 +12,14 @@ async function processImage(buffer, fileName) {
   const modelBuffer = await loadModelFromGCS(); // Mengunduh model dari GCS
 
   // Simpan buffer model ke file sementara
-  const modelPath = path.join(__dirname, 'temp_model.pth');
+  const modelPath = path.join(__dirname, 'model_pakan-ikan-akhir.pth');
   fs.writeFileSync(modelPath, modelBuffer);
 
   // DEBUG: Cek argumen yang akan dikirim ke Python
   console.log(`[DEBUG] Akan menjalankan: python detect_objects.py ${fileName} ${modelPath}`);
 
   return new Promise((resolve, reject) => {
-    exec(`python detect_objects.py ${fileName} model_pakan-ikan-akhir.pth`, async (err, stdout, stderr) => {
+    exec(`python detect_objects.py ${fileName} ${modelPath}`, async (err, stdout, stderr) => {
       if (err) {
         console.error('[DEBUG] Deteksi gagal:', stderr);
         return reject(err);
@@ -91,21 +91,52 @@ async function loadModelFromGCS(modelFileName = 'model_pakan-ikan-akhir.pth') {
 
 // Fungsi untuk menghitung jumlah objek "pakan ikan" yang terdeteksi
 function countFishFood(detectedObjects) {
-  // Misalnya, kita asumsikan objek "pakan ikan" memiliki label tertentu, seperti "fish_food"
-  // Anda bisa mengganti kode ini untuk menyesuaikan dengan hasil keluaran model YOLOv8
-  const objects = JSON.parse(detectedObjects);  // Misalnya deteksi menghasilkan JSON
+  const objects = JSON.parse(detectedObjects);  
   let fishFoodCount = 0;
   
   objects.forEach(obj => {
-    if (obj.label === 'pakan_ikan') {  // Ganti 'fish_food' sesuai dengan label yang relevan
+    if (obj.label === 'pakan_ikan') {  // Sesuaikan dengan label yang relevan
       fishFoodCount += 1;
     }
   });
 
   return fishFoodCount;
 }
+
+// Fungsi untuk mendapatkan gambar terbaru berdasarkan waktu atau urutan file
+async function getLatestImageFromGCS(bucketName) {
+  const [files] = await bucket.getFiles();
+  
+  // Filter file gambar
+  const images = files.filter(file => file.name.endsWith('.jpg') || file.name.endsWith('.jpeg') || file.name.endsWith('.png'));
+  
+  if (images.length === 0) {
+    console.log("[INFO] Tidak ada gambar ditemukan di bucket.");
+    return null;
+  }
+
+  // Urutkan gambar berdasarkan nama file atau tanggal, pilih gambar yang terbaru
+  const latestImage = images.sort((a, b) => {
+    return b.name.localeCompare(a.name);  // Asumsi nama file mengikuti timestamp yang terbaru
+  })[0];  // Ambil gambar pertama (terbaru)
+
+  console.log(`[INFO] Gambar terbaru: ${latestImage.name}`);
+  return latestImage.name;
+}
+
+// Fungsi untuk memproses gambar terbaru dari GCS
+async function processLatestImage() {
+  const latestImage = await getLatestImageFromGCS('your-gcs-bucket-name');  // Ganti dengan nama bucket Anda
+  if (latestImage) {
+    await processImage(latestImage);  // Proses gambar terbaru
+  } else {
+    console.log("[INFO] Tidak ada gambar untuk diproses.");
+  }
+}
+
 module.exports = {
   processImage,
   loadModelFromGCS,
-  countFishFood
+  countFishFood,
+  processLatestImage,
 };
