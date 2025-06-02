@@ -79,18 +79,9 @@ async function executeFeeding(kolam, jadwalKey) {
       console.log(`[DEBUG] Selesai moveServoAndTakePhoto untuk ${kolam}`);
 
       // makananHabis = await askUserTerminalFood(`Apakah makanan di kolam ${kolam} sudah habis setelah iterasi ${i + 1}? (y/n): `);
-      makananHabis = await processImage(`https://storage.googleapis.com/your-bucket-name/path/to/image.jpg`, "foto diambil");
+      //makananHabis = await processImage(buffer, fileName);
 
-      if (makananHabis) {
-        console.log(`Makanan di kolam ${kolam} habis pada iterasi ${i + 1}.`);
-        // Panggil ulang executeFeeding untuk jadwal yang sama
-        try {
-          await executeFeeding(kolam, jadwalKey);
-        } catch (err) {
-          console.error(`Gagal menjalankan executeFeeding ulang untuk ${kolam} pada ${jadwalKey}:`, err);
-        }
-        break;
-      }
+      
       await delay(20000);
     }
 

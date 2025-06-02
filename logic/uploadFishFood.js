@@ -4,7 +4,7 @@ const sharp = require('sharp');
 const fs = require('fs');
 const TelegramBot = require('node-telegram-bot-api');
 const { sendTelegramImage } = require('../telegram/telegramUtils');
-
+const {processImage}= require('./machineLearning')
 // Inisialisasi Google Cloud Storage
 const storage = new Storage({
   keyFilename: path.join(__dirname, '../credentials/cloud-storage-access.json'),

@@ -1,7 +1,8 @@
 const { exec } = require('child_process');
 const axios = require('axios');
 const fs = require('fs');
-
+const {sendTelegramImage} = require('../telegram/telegramUtils');
+const { Storage } = require('@google-cloud/storage');
 // Fungsi untuk mendeteksi objek menggunakan YOLOv8 dengan PyTorch
 async function processImage(buffer, fileName) {
   // URL model YOLOv8 di GCS
@@ -11,30 +12,30 @@ async function processImage(buffer, fileName) {
   const model = await loadModelFromGCS(modelUrl);
 
   // Jalankan deteksi objek menggunakan model YOLOv8
-  exec(`python detect_objects.py ${fileName} ${model}`, async (err, stdout, stderr) => {
-    if (err) {
-      console.error('Deteksi gagal:', stderr);
-      return;
-    }
+return new Promise((resolve, reject) => {
+    // Jalankan deteksi objek menggunakan model YOLOv8
+    exec(`python detect_objects.py ${fileName}`, async (err, stdout, stderr) => {
+      if (err) {
+        console.error('Deteksi gagal:', stderr);
+        return reject(err);
+      }
 
-    console.log('Hasil deteksi:', stdout);
+      console.log('Hasil deteksi:', stdout);
 
-    // Ekstrak informasi jumlah objek "pakan ikan" yang terdeteksi
-    const detectedFishFoodCount = countFishFood(stdout);  // Fungsi untuk menghitung pakan ikan
+      // Ekstrak informasi jumlah objek "pakan ikan" yang terdeteksi
+      const detectedFishFoodCount = countFishFood(stdout);
 
-    let statusMessage = 'Pakan masih banyak';  // Default status
-    if (detectedFishFoodCount <= 10) {
-      statusMessage = 'Pakan habis/hampir habis';
-      
-    }
+      let statusMessage = 'Pakan masih banyak';
+      let makananHabis = false;
+      if (detectedFishFoodCount <= 10) {
+        statusMessage = 'Pakan habis/hampir habis';
+        makananHabis = true;
+      }
 
-    // Kirim gambar hasil deteksi dan status pakan ke Telegram
-    await sendTelegramImage(`https://storage.googleapis.com/${bucketName}/${fileName}`, `Hasil deteksi objek: ${statusMessage}`);
-    // bot.sendPhoto(chatId, buffer, {
-    //   caption: `Hasil deteksi objek: ${statusMessage}`,
-    // })
-    // .then(() => console.log('Gambar hasil deteksi berhasil dikirim ke Telegram'))
-    // .catch(err => console.error('Gagal mengirim gambar:', err));
+      // Kirim gambar hasil deteksi dan status pakan ke Telegram
+      await sendTelegramImage(`https://storage.googleapis.com/${bucketName}/${fileName}`, `Hasil deteksi objek: ${statusMessage}`);
+
+    });
   });
 }
 
@@ -73,7 +74,7 @@ function countFishFood(detectedObjects) {
 
   return fishFoodCount;
 }
-exports = {
+module.exports = {
   processImage,
   loadModelFromGCS,
   countFishFood
