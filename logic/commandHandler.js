@@ -1,5 +1,6 @@
 const { setSchedule, getSchedule } = require("./scheduleFunctions");
 const { startSecurityCheck, stopSecurityCheck, securityActive } = require("../logic/securityActivation");
+const { viewSchedule } = require("./viewSchedule"); // Tambahkan ini
 
 async function handleTelegramCommand(text, chatId, bot) {
   if (text.startsWith("/set")) {
@@ -14,6 +15,9 @@ async function handleTelegramCommand(text, chatId, bot) {
   } else if (text.startsWith("/list")) {
     const schedules = await getSchedule();
     await bot.sendMessage(chatId, JSON.stringify(schedules, null, 2));
+  }else if (text.startsWith("/lihatjadwal")) {
+    const jadwalText = await viewSchedule();
+    await bot.sendMessage(chatId, jadwalText);
   } else if (text.startsWith("/security")) {
     const [, action] = text.split(" ");
     if (action === "on") {
@@ -27,7 +31,7 @@ async function handleTelegramCommand(text, chatId, bot) {
     const helpMessage = `
 Daftar Command:
 /set <kolam> <jadwal> <jam>  - Set jadwal (contoh: /set kolam1 jadwal2 08:00)
-/list                        - Lihat semua jadwal
+/lihatjadwal                 - Lihat jadwal dalam format mudah dibaca
 /security on                 - Aktifkan security check
 /security off                - Matikan security check
 /help                        - Lihat daftar command

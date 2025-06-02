@@ -3,7 +3,7 @@ const { executeFeeding } = require("../logic/executeFeeding");
 const { askUserTelegramFood, sendTelegramMessage } = require("../telegram/telegramUtils");
 const { moveServoAndTakePhoto } = require("../logic/servoHandler");
 const { admin, db } = require("../config/firebase");
-
+const { askUserTerminalFood } = require("../logic/mlSimulation");
 async function startScheduler() {
   setInterval(async () => {
     const schedules = await getSchedule();
@@ -16,6 +16,7 @@ async function startScheduler() {
         const key = jadwalKeys[i];
         const { currentTime, doneToday } = schedules[kolam][key];
         if (currentTime === timeHM && !doneToday) {
+          sendTelegramMessage(`Jadwal feeding untuk ${kolam} pada ${key} telah tiba (${currentTime}), memulai pengecekan pakan di kolam...`);
           // Tentukan parameter servoCommand sesuai kolam
           let servoCommand = "";
           if (kolam === "kolam1") {
@@ -29,9 +30,10 @@ async function startScheduler() {
               console.error(`Gagal menjalankan moveServoAndTakePhoto untuk ${kolam}:`, err)
             );
           }
+          console.log(`[DEBUG] Selesai moveServoAndTakePhoto untuk ${kolam}`);
 
           // Tanya user dulu sebagai dummy dari machine learning
-          const makananHabis = await askUserTelegramFood(`Apakah makanan di kolam ${kolam} sudah habis ? (y/n): `);
+          const makananHabis = await askUserTerminalFood(`Apakah makanan di kolam ${kolam} sudah habis ? (y/n): `);
           if (makananHabis) {
             await executeFeeding(kolam, key);
             schedules[kolam][key].doneToday = true;
@@ -40,21 +42,31 @@ async function startScheduler() {
             await sendTelegramMessage(`Feeding berhasil dilakukan untuk ${kolam} pada jadwal ${key} (${currentTime})`);
           } else {
             // Tambah 5 menit dari jadwal sekarang
-            const [jam, menit] = currentTime.split(":").map(Number);
-            const date = new Date(now.getFullYear(), now.getMonth(), now.getDate(), jam, menit + 5);
-            const newTime = `${date.getHours().toString().padStart(2, "0")}:${date.getMinutes().toString().padStart(2, "0")}`;
-            await setSchedule(kolam, key, newTime, false);
+// ...existing code...
+          // Tambah 5 menit dari jadwal sekarang
+          const [jam, menit] = currentTime.split(":").map(Number);
+          const date = new Date(now.getFullYear(), now.getMonth(), now.getDate(), jam, menit + 5);
+          const newTime = `${date.getHours().toString().padStart(2, "0")}:${date.getMinutes().toString().padStart(2, "0")}`;
+          await setSchedule(kolam, key, newTime, false);
+          await sendTelegramMessage(`Jadwal feeding untuk ${kolam} pada ${key} diubah ke ${newTime} karena makanan belum habis.`);
 
-            // Cek jadwal berikutnya
-            const nextJadwalKey = jadwalKeys[i + 1];
-            const nextJadwal = nextJadwalKey ? schedules[kolam][nextJadwalKey] : null;
-            if (nextJadwal && nextJadwal.defaultTime) {
-              if (newTime >= nextJadwal.defaultTime) {
-                await db.ref(`feedingSchedules/${kolam}/${nextJadwalKey}/doneToday`).set(true);
-                const msg = `Jadwal ${nextJadwalKey} untuk ${kolam} dilewati karena currentTime jadwal sebelumnya (${newTime}) > defaultTime jadwal berikutnya (${nextJadwal.defaultTime})`;
-                console.log(msg);
-                // Kirim pesan ke Telegram jika jadwal berikutnya dilewati
-                await sendTelegramMessage(msg);
+          // Cek jadwal berikutnya
+          const nextJadwalKey = jadwalKeys[i + 1];
+          const nextJadwal = nextJadwalKey ? schedules[kolam][nextJadwalKey] : null;
+          if (nextJadwal && nextJadwal.defaultTime) {
+            // Konversi waktu ke menit untuk perbandingan
+            const toMinutes = (str) => {
+              const [h, m] = str.split(":").map(Number);
+              return h * 60 + m;
+            };
+            if (toMinutes(newTime) >= toMinutes(nextJadwal.defaultTime)) {
+              await db.ref(`feedingSchedules/${kolam}/${nextJadwalKey}/doneToday`).set(true);
+              const msg = `Jadwal ${nextJadwalKey} untuk ${kolam} dilewati karena currentTime jadwal sebelumnya (${newTime}) >= defaultTime jadwal berikutnya (${nextJadwal.defaultTime})`;
+              console.log(msg);
+              await sendTelegramMessage(msg);
+            
+          
+// ...existing code...
               }
             }
           }

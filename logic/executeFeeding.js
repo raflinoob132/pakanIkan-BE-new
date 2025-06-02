@@ -1,7 +1,9 @@
 const readline = require("readline");
 const { db } = require("../config/firebase");
 const { moveServoAndTakePhoto } = require("./servoHandler");
-const { sendTelegramMessage,askUserTelegramFood } = require("../telegram/telegramUtils");
+const { sendTelegramMessage,askUserTelegramFood,sendTelegramImage } = require("../telegram/telegramUtils");
+const { askUserTerminalFood } = require("./mlSimulation");
+const {processImage} = require("./machineLearning");
 
 async function executeFeeding(kolam, jadwalKey) {
   let motorKey;
@@ -50,7 +52,7 @@ async function executeFeeding(kolam, jadwalKey) {
   });
 
   console.log(`Pakan dieksekusi untuk ${kolam} dengan durasi ${duration}s`);
-
+  sendTelegramMessage(`Pakan dieksekusi untuk ${kolam} dengan durasi ${duration}s`);
   // Tunggu hingga motorA atau motorB dikembalikan ke 0 oleh ESP32
   await new Promise((resolve) => {
     const interval = setInterval(async () => {
@@ -74,7 +76,11 @@ async function executeFeeding(kolam, jadwalKey) {
       await moveServoAndTakePhoto(/*kolam,*/ servoCommand, "makanan").catch((err) =>
         console.error(`Error pada iterasi ${i + 1}:`, err)
       );
-      makananHabis = await askUserTelegramFood(`Apakah makanan di kolam ${kolam} sudah habis setelah iterasi ${i + 1}? (y/n): `);
+      console.log(`[DEBUG] Selesai moveServoAndTakePhoto untuk ${kolam}`);
+
+      // makananHabis = await askUserTerminalFood(`Apakah makanan di kolam ${kolam} sudah habis setelah iterasi ${i + 1}? (y/n): `);
+      makananHabis = await processImage(`https://storage.googleapis.com/your-bucket-name/path/to/image.jpg`, "foto diambil");
+
       if (makananHabis) {
         console.log(`Makanan di kolam ${kolam} habis pada iterasi ${i + 1}.`);
         // Panggil ulang executeFeeding untuk jadwal yang sama
