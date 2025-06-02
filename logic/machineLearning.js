@@ -106,5 +106,6 @@ function countFishFood(detectedObjects) {
 module.exports = {
   processImage,
   loadModelFromGCS,
-  countFishFood
+  countFishFood,
+  processLatestImage,
 };
