@@ -7,7 +7,7 @@ const {bucket}= require('../config/storage');
 const path = require('path');
 
 // Fungsi untuk mendeteksi objek menggunakan YOLOv8 dengan PyTorch
-async function processImage(buffer, fileName) {
+async function processImage(fileName) {
   // Cek apakah model perlu diunduh terlebih dahulu
   const modelBuffer = await loadModelFromGCS(); // Mengunduh model dari GCS
 
@@ -126,7 +126,7 @@ async function getLatestImageFromGCS(bucketName) {
 
 // Fungsi untuk memproses gambar terbaru dari GCS
 async function processLatestImage() {
-  const latestImage = await getLatestImageFromGCS('your-gcs-bucket-name');  // Ganti dengan nama bucket Anda
+  const latestImage = await getLatestImageFromGCS('pakan-ikan123');  // Ganti dengan nama bucket Anda
   if (latestImage) {
     await processImage(latestImage);  // Proses gambar terbaru
   } else {
