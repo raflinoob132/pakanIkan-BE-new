@@ -1,10 +1,11 @@
 const readline = require("readline");
 const { db } = require("../config/firebase");
 const { moveServoAndTakePhoto } = require("./servoHandler");
-const { sendTelegramMessage,askUserTelegramFood,sendTelegramImage } = require("../telegram/telegramUtils");
+const { sendTelegramMessage,askUserTelegramFood } = require("../telegram/telegramUtils");
 const { askUserTerminalFood } = require("./mlSimulation");
-const {processImage} = require("./machineLearning");
-
+//const {Storage} = require('@google-cloud/storage');
+const { processImage } = require("./machineLearning");
+const {getLatestPhotoFromGCS} = require("./uploadFishFood");
 async function executeFeeding(kolam, jadwalKey) {
   let motorKey;
   let servoCommand;
@@ -78,12 +79,28 @@ async function executeFeeding(kolam, jadwalKey) {
       );
       console.log(`[DEBUG] Selesai moveServoAndTakePhoto untuk ${kolam}`);
 
-      // makananHabis = await askUserTerminalFood(`Apakah makanan di kolam ${kolam} sudah habis setelah iterasi ${i + 1}? (y/n): `);
-      //makananHabis = await processImage(buffer, fileName);
+const latestPhoto = await getLatestPhotoFromGCS('pakan-ikan123'); // ganti dengan nama bucket kamu
+  let makananHabis = false;
+  if (latestPhoto) {
+    // Proses gambar dengan ML
+    const result = await processImage(latestPhoto.buffer, latestPhoto.fileName);
+    makananHabis = result.makananHabis;
+    console.log(`[DEBUG] Hasil ML: makananHabis = ${makananHabis}, count = ${result.detectedFishFoodCount}`);
+  } else {
+    console.log('[DEBUG] Tidak ada foto terbaru di GCS, skip pengecekan ML.');
+  }
 
-      
-      await delay(20000);
+  if (makananHabis) {
+    console.log(`Makanan di kolam ${kolam} habis pada iterasi ${i + 1}.`);
+    try {
+      await executeFeeding(kolam, jadwalKey);
+    } catch (err) {
+      console.error(`Gagal menjalankan executeFeeding ulang untuk ${kolam} pada ${jadwalKey}:`, err);
     }
+    break;
+  }
+  await delay(20000);
+}
 
     // if (!makananHabis && nextJadwalKey && jadwalList[nextJadwalKey]) {
     //   await db.ref(`feedingSchedules/${kolam}/${nextJadwalKey}/duration`).set(0);

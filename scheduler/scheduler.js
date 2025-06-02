@@ -1,9 +1,11 @@
 const { getSchedule, setSchedule } = require("../logic/scheduleFunctions");
 const { executeFeeding } = require("../logic/executeFeeding");
-const { askUserTelegramFood, sendTelegramMessage } = require("../telegram/telegramUtils");
+const { sendTelegramMessage } = require("../telegram/telegramUtils");
 const { moveServoAndTakePhoto } = require("../logic/servoHandler");
-const { admin, db } = require("../config/firebase");
-const { askUserTerminalFood } = require("../logic/mlSimulation");
+const { db } = require("../config/firebase");
+const { getLatestPhotoFromGCS } = require("../logic/uploadFishFood");
+const { processImage } = require("../logic/machineLearning");
+
 async function startScheduler() {
   setInterval(async () => {
     const schedules = await getSchedule();
@@ -24,7 +26,7 @@ async function startScheduler() {
           } else if (kolam === "kolam2") {
             servoCommand = "0,100";
           }
-          // Panggil moveServoAndTakePhoto sebelum tanya user
+          // Panggil moveServoAndTakePhoto sebelum cek ML
           if (servoCommand) {
             await moveServoAndTakePhoto(servoCommand, "makanan").catch((err) =>
               console.error(`Gagal menjalankan moveServoAndTakePhoto untuk ${kolam}:`, err)
@@ -32,41 +34,43 @@ async function startScheduler() {
           }
           console.log(`[DEBUG] Selesai moveServoAndTakePhoto untuk ${kolam}`);
 
-          // Tanya user dulu sebagai dummy dari machine learning
-          const makananHabis = await askUserTerminalFood(`Apakah makanan di kolam ${kolam} sudah habis ? (y/n): `);
+          // --- Cek pakan habis dengan ML ---
+          let makananHabis = false;
+          const latestPhoto = await getLatestPhotoFromGCS();
+          if (latestPhoto) {
+            const result = await processImage(latestPhoto.buffer, latestPhoto.fileName);
+            makananHabis = result.makananHabis;
+            console.log(`[DEBUG] Hasil ML: makananHabis = ${makananHabis}, count = ${result.detectedFishFoodCount}`);
+          } else {
+            console.log('[DEBUG] Tidak ada foto terbaru di GCS, skip pengecekan ML.');
+          }
+
           if (makananHabis) {
             await executeFeeding(kolam, key);
             schedules[kolam][key].doneToday = true;
             await db.ref(`feedingSchedules/${kolam}/${key}/doneToday`).set(true);
-            // Kirim pesan ke Telegram jika feeding berhasil
             await sendTelegramMessage(`Feeding berhasil dilakukan untuk ${kolam} pada jadwal ${key} (${currentTime})`);
           } else {
             // Tambah 5 menit dari jadwal sekarang
-// ...existing code...
-          // Tambah 5 menit dari jadwal sekarang
-          const [jam, menit] = currentTime.split(":").map(Number);
-          const date = new Date(now.getFullYear(), now.getMonth(), now.getDate(), jam, menit + 5);
-          const newTime = `${date.getHours().toString().padStart(2, "0")}:${date.getMinutes().toString().padStart(2, "0")}`;
-          await setSchedule(kolam, key, newTime, false);
-          await sendTelegramMessage(`Jadwal feeding untuk ${kolam} pada ${key} diubah ke ${newTime} karena makanan belum habis.`);
+            const [jam, menit] = currentTime.split(":").map(Number);
+            const date = new Date(now.getFullYear(), now.getMonth(), now.getDate(), jam, menit + 5);
+            const newTime = `${date.getHours().toString().padStart(2, "0")}:${date.getMinutes().toString().padStart(2, "0")}`;
+            await setSchedule(kolam, key, newTime, false);
+            await sendTelegramMessage(`Jadwal feeding untuk ${kolam} pada ${key} diubah ke ${newTime} karena makanan belum habis.`);
 
-          // Cek jadwal berikutnya
-          const nextJadwalKey = jadwalKeys[i + 1];
-          const nextJadwal = nextJadwalKey ? schedules[kolam][nextJadwalKey] : null;
-          if (nextJadwal && nextJadwal.defaultTime) {
-            // Konversi waktu ke menit untuk perbandingan
-            const toMinutes = (str) => {
-              const [h, m] = str.split(":").map(Number);
-              return h * 60 + m;
-            };
-            if (toMinutes(newTime) >= toMinutes(nextJadwal.defaultTime)) {
-              await db.ref(`feedingSchedules/${kolam}/${nextJadwalKey}/doneToday`).set(true);
-              const msg = `Jadwal ${nextJadwalKey} untuk ${kolam} dilewati karena currentTime jadwal sebelumnya (${newTime}) >= defaultTime jadwal berikutnya (${nextJadwal.defaultTime})`;
-              console.log(msg);
-              await sendTelegramMessage(msg);
-            
-          
-// ...existing code...
+            // Cek jadwal berikutnya
+            const nextJadwalKey = jadwalKeys[i + 1];
+            const nextJadwal = nextJadwalKey ? schedules[kolam][nextJadwalKey] : null;
+            if (nextJadwal && nextJadwal.defaultTime) {
+              const toMinutes = (str) => {
+                const [h, m] = str.split(":").map(Number);
+                return h * 60 + m;
+              };
+              if (toMinutes(newTime) >= toMinutes(nextJadwal.defaultTime)) {
+                await db.ref(`feedingSchedules/${kolam}/${nextJadwalKey}/doneToday`).set(true);
+                const msg = `Jadwal ${nextJadwalKey} untuk ${kolam} dilewati karena currentTime jadwal sebelumnya (${newTime}) >= defaultTime jadwal berikutnya (${nextJadwal.defaultTime})`;
+                console.log(msg);
+                await sendTelegramMessage(msg);
               }
             }
           }
