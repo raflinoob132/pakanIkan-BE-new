@@ -4,10 +4,19 @@ const fs = require('fs');
 const {sendTelegramImage} = require('../telegram/telegramUtils');
 const { Storage } = require('@google-cloud/storage');
 const {bucket}= require('../config/storage');
+const path = require('path');
+
 // Fungsi untuk mendeteksi objek menggunakan YOLOv8 dengan PyTorch
 async function processImage(buffer, fileName) {
+  // Cek apakah model perlu diunduh terlebih dahulu
+  const modelBuffer = await loadModelFromGCS(); // Mengunduh model dari GCS
+
+  // Simpan buffer model ke file sementara
+  const modelPath = path.join(__dirname, 'temp_model.pth');
+  fs.writeFileSync(modelPath, modelBuffer);
+
   // DEBUG: Cek argumen yang akan dikirim ke Python
-  console.log(`[DEBUG] Akan menjalankan: python detect_objects.py ${fileName} model_pakan-ikan-akhir.pth`);
+  console.log(`[DEBUG] Akan menjalankan: python detect_objects.py ${fileName} ${modelPath}`);
 
   return new Promise((resolve, reject) => {
     exec(`python detect_objects.py ${fileName} model_pakan-ikan-akhir.pth`, async (err, stdout, stderr) => {
