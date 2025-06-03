@@ -19,14 +19,13 @@ if gcp_credentials:
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = gcp_credentials
 
 # Ambil token dan chat id Telegram dari env
-# TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-# TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 # if not TELEGRAM_BOT_TOKEN:
 #     TELEGRAM_BOT_TOKEN = "7427324362:AAGerepPrfH4k7L2wKhvhFsgtxd_l8KGo2w"
 # if not TELEGRAM_CHAT_ID:
 #     TELEGRAM_CHAT_ID = "1402957155"
-TELEGRAM_BOT_TOKEN = "7427324362:AAGerepPrfH4k7L2wKhvhFsgtxd_l8KGo2w"
-TELEGRAM_CHAT_ID = "1402957155"
+
 # Ambil path gambar (bisa nama file lokal atau path GCS) dan model dari argumen
 image_path = sys.argv[1]
 model_path = sys.argv[2]

@@ -26,7 +26,7 @@ async function executeFeeding(kolam, jadwalKey) {
   // Ambil semua jadwal kolam
   const snapshot = await db.ref(`feedingSchedules/${kolam}`).once("value");
   const jadwalList = snapshot.val();
-  let duration = jadwalList[jadwalKey]?.duration || 5;
+  let duration = jadwalList[jadwalKey]?.duration || 0.25;
 
   // Urutkan key jadwal secara numerik
   const sortedKeys = Object.keys(jadwalList).sort((a, b) => {

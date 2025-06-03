@@ -62,9 +62,12 @@ async function startScheduler() {
             await sendTelegramMessage(`Feeding berhasil dilakukan untuk ${kolam} pada jadwal ${key} (${add7Hours(currentTime)})`);
           } else {
             // Tambah 5 menit dari jadwal sekarang
-            const [jam, menit] = currentTime.split(":").map(Number);
-            const date = new Date(now.getFullYear(), now.getMonth(), now.getDate(), jam, menit + 5);
-            const newTime = `${date.getHours().toString().padStart(2, "0")}:${date.getMinutes().toString().padStart(2, "0")}`;
+             const [jam, menit] = currentTime.split(":").map(Number);
+            // Buat objek Date UTC
+            const date = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), jam, menit));
+            date.setUTCMinutes(date.getUTCMinutes() + 5);
+            // Ambil jam dan menit hasil penambahan (masih UTC)
+            const newTime = `${String(date.getUTCHours()).padStart(2, "0")}:${String(date.getUTCMinutes()).padStart(2, "0")}`;
             await setSchedule(kolam, key, newTime, false);
             await sendTelegramMessage(`Jadwal feeding untuk ${kolam} pada ${key} diubah ke (${add7Hours(newTime)}) karena makanan belum habis.`);
 
