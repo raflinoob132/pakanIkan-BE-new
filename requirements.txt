@@ -1,0 +1,5 @@
+torch==2.7.0
+ultralytics==8.0.0
+Pillow==8.4.0
+google-cloud-storage==3.0.0
+requests==2.26.0
