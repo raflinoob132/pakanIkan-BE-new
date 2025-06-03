@@ -30,7 +30,10 @@ COPY detect_objects.py /app/
 COPY logic/model_pakan-ikan-akhir.pt /app/models/
 
 # --- Menggabungkan Layer untuk Node.js dan Python ---
-FROM node:16 AS final
+FROM node:22.13.1 AS final
+
+# Install Python di final image
+RUN apt-get update && apt-get install -y python3 python3-pip
 
 # Set working directory untuk aplikasi final
 WORKDIR /app
