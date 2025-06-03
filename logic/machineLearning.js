@@ -18,11 +18,14 @@ async function processImage(buffer, fileName) {
   console.log(`[DEBUG] Akan menjalankan: python detect_objects.py "${gcsImagePath}" "${modelPath}"`);
 
   return new Promise((resolve, reject) => {
-    exec(`python detect_objects.py "${gcsImagePath}" "${modelPath}"`, async (err, stdout, stderr) => {
-      if (err) {
-        console.error('[DEBUG] Deteksi gagal:', stderr);
-        return reject(err);
-      }
+    exec(
+      `python detect_objects.py "${gcsImagePath}" "${modelPath}"`,
+      { env: process.env }, // <-- Tambahkan baris ini!
+      async (err, stdout, stderr) => {
+        if (err) {
+          console.error('[DEBUG] Deteksi gagal:', stderr);
+          return reject(err);
+        }
 
       console.log('[DEBUG] Hasil deteksi dari Python:', stdout);
 
