@@ -6,6 +6,16 @@ const { db } = require("../config/firebase");
 const { getLatestPhotoFromGCS } = require("../logic/uploadFishFood");
 const { processImage } = require("../logic/machineLearning");
 
+function add7Hours(timeStr) {
+  // timeStr: "HH:mm"
+  const [hour, minute] = timeStr.split(":").map(Number);
+  let date = new Date(2000, 0, 1, hour, minute); // tanggal dummy
+  date.setHours(date.getHours() + 7);
+  const h = String(date.getHours()).padStart(2, "0");
+  const m = String(date.getMinutes()).padStart(2, "0");
+  return `${h}:${m}`;
+}
+
 async function startScheduler() {
   setInterval(async () => {
     const schedules = await getSchedule();
@@ -18,7 +28,7 @@ async function startScheduler() {
         const key = jadwalKeys[i];
         const { currentTime, doneToday } = schedules[kolam][key];
         if (currentTime === timeHM && !doneToday) {
-          sendTelegramMessage(`Jadwal feeding untuk ${kolam} pada ${key} telah tiba (${currentTime}), memulai pengecekan pakan di kolam...`);
+          sendTelegramMessage(`Jadwal feeding untuk ${kolam} pada ${key} telah tiba (${add7Hours(currentTime)}), memulai pengecekan pakan di kolam...`);
           // Tentukan parameter servoCommand sesuai kolam
           let servoCommand = "";
           if (kolam === "kolam1") {
@@ -49,14 +59,14 @@ async function startScheduler() {
             await executeFeeding(kolam, key);
             schedules[kolam][key].doneToday = true;
             await db.ref(`feedingSchedules/${kolam}/${key}/doneToday`).set(true);
-            await sendTelegramMessage(`Feeding berhasil dilakukan untuk ${kolam} pada jadwal ${key} (${currentTime})`);
+            await sendTelegramMessage(`Feeding berhasil dilakukan untuk ${kolam} pada jadwal ${key} (${add7Hours(currentTime)})`);
           } else {
             // Tambah 5 menit dari jadwal sekarang
             const [jam, menit] = currentTime.split(":").map(Number);
             const date = new Date(now.getFullYear(), now.getMonth(), now.getDate(), jam, menit + 5);
             const newTime = `${date.getHours().toString().padStart(2, "0")}:${date.getMinutes().toString().padStart(2, "0")}`;
             await setSchedule(kolam, key, newTime, false);
-            await sendTelegramMessage(`Jadwal feeding untuk ${kolam} pada ${key} diubah ke ${newTime} karena makanan belum habis.`);
+            await sendTelegramMessage(`Jadwal feeding untuk ${kolam} pada ${key} diubah ke (${add7Hours(newTime)}) karena makanan belum habis.`);
 
             // Cek jadwal berikutnya
             const nextJadwalKey = jadwalKeys[i + 1];
@@ -68,7 +78,7 @@ async function startScheduler() {
               };
               if (toMinutes(newTime) >= toMinutes(nextJadwal.defaultTime)) {
                 await db.ref(`feedingSchedules/${kolam}/${nextJadwalKey}/doneToday`).set(true);
-                const msg = `Jadwal ${nextJadwalKey} untuk ${kolam} dilewati karena currentTime jadwal sebelumnya (${newTime}) >= defaultTime jadwal berikutnya (${nextJadwal.defaultTime})`;
+                const msg = `Jadwal ${nextJadwalKey} untuk ${kolam} dilewati karena currentTime jadwal sebelumnya (${add7Hours(newTime)}) >= defaultTime jadwal berikutnya (${add7Hours(nextJadwal.defaultTime)})`;
                 console.log(msg);
                 await sendTelegramMessage(msg);
               }
