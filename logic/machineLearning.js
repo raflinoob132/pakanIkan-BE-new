@@ -4,12 +4,14 @@ const { sendTelegramImage } = require('../telegram/telegramUtils');
 const { bucket } = require('../config/storage');
 const path = require('path');
 
-// Fungsi untuk mendeteksi objek menggunakan YOLOv8 dengan PyTorch
 async function processImage(buffer, fileName) {
-  // Download model dari GCS
-  const modelBuffer = await loadModelFromGCS();
   const modelPath = path.join(__dirname, 'model_pakan-ikan-akhir.pt');
-  fs.writeFileSync(modelPath, modelBuffer);
+
+  // Cek apakah model sudah ada di lokal
+  if (!fs.existsSync(modelPath)) {
+    const modelBuffer = await loadModelFromGCS();
+    fs.writeFileSync(modelPath, modelBuffer);
+  }
 
   // Gunakan path GCS untuk gambar
   const gcsImagePath = `gs://pakan-ikan123/${fileName}`;
@@ -89,6 +91,8 @@ async function loadModelFromGCS(modelFileName = 'model_pakan-ikan-akhir.pt') {
     throw err;
   }
 }
+
+// ...fungsi countFishFood dan module.exports tetap...
 
 // Fungsi untuk menghitung jumlah objek "pakan ikan" yang terdeteksi
 function countFishFood(detectedObjects) {

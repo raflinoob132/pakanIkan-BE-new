@@ -8,6 +8,10 @@ import io
 import os
 import contextlib
 import requests
+from dotenv import load_dotenv
+
+# Memuat variabel lingkungan dari file .env
+load_dotenv()
 
 # Ambil path credentials dari env GOOGLECLOUDCREDENTIALS (misal dari .env)
 gcp_credentials = os.getenv("GOOGLECLOUDCREDENTIALS")

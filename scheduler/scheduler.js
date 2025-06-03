@@ -22,9 +22,9 @@ async function startScheduler() {
           // Tentukan parameter servoCommand sesuai kolam
           let servoCommand = "";
           if (kolam === "kolam1") {
-            servoCommand = "0,20";
+            servoCommand = "150,150";
           } else if (kolam === "kolam2") {
-            servoCommand = "0,100";
+            servoCommand = "40,150";
           }
           // Panggil moveServoAndTakePhoto sebelum cek ML
           if (servoCommand) {

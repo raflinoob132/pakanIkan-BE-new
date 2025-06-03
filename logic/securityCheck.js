@@ -12,8 +12,8 @@ async function checkSecurity() {
   }
 
   const servoCommands = {
-    sensor1: "0,90",
-    sensor2: "180,90",
+    sensor1: "180,90",
+    sensor2: "0,90",
     sensor3: "50,60",
     sensor4: "70,80"
   };

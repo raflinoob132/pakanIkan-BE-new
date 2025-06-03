@@ -13,11 +13,11 @@ async function executeFeeding(kolam, jadwalKey) {
   switch (kolam) {
     case "kolam1":
       motorKey = "motorA";
-      servoCommand = "0,20";
+      servoCommand = "150,150";
       break;
     case "kolam2":
       motorKey = "motorB";
-      servoCommand = "180,20";
+      servoCommand = "40,150";
       break;
     default:
       return;
