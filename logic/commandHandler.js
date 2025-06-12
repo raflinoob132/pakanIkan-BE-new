@@ -1,7 +1,8 @@
 const { setSchedule, getSchedule } = require("./scheduleFunctions");
 const { startSecurityCheck, stopSecurityCheck, securityActive } = require("../logic/securityActivation");
 const { viewSchedule } = require("./viewSchedule"); // Tambahkan ini
-
+const { checkFoodCapacity } = require("./checkFoodCapacity"); // Tambahkan ini
+const { moveServoAndTakePhoto } = require("./servoHandler"); // Pastikan ini sudah ada
 async function handleTelegramCommand(text, chatId, bot) {
   if (text.startsWith("/set")) {
     // Format: /set kolam1 jadwal2 08:00
@@ -37,6 +38,26 @@ Daftar Command:
 /help                        - Lihat daftar command
     `;
     await bot.sendMessage(chatId, helpMessage);
+  }else if (text.startsWith("/cekpakan")) {
+    const [, kotak] = text.split(" ");
+    if (kotak !== "A" && kotak !== "B") {
+      await bot.sendMessage(chatId, "Gunakan /cekpakan A atau /cekpakan B untuk mengecek kapasitas pakan.");
+      return;
+    }
+    await checkFoodCapacity(kotak);
+  }else if (text.startsWith("/testservo")) {
+    await bot.sendMessage(chatId, "Memulai test 2x moveServoAndTakePhoto (akan antre jika lock bekerja)...");
+
+    // Panggil dua kali berturut-turut
+    moveServoAndTakePhoto("0,110", "keamanan")
+      .then(() => bot.sendMessage(chatId, "moveServoAndTakePhoto pertama selesai"))
+      .catch(err => bot.sendMessage(chatId, "moveServoAndTakePhoto pertama error: " + err.message));
+
+    moveServoAndTakePhoto("180,110", "keamanan")
+      .then(() => bot.sendMessage(chatId, "moveServoAndTakePhoto kedua selesai"))
+      .catch(err => bot.sendMessage(chatId, "moveServoAndTakePhoto kedua error: " + err.message));
+
+  // ...existing code...
   } else {
     await bot.sendMessage(chatId, "Perintah tidak dikenal. Gunakan /help untuk melihat daftar command.");
   }
