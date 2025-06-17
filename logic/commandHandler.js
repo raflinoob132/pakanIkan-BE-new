@@ -28,6 +28,20 @@ async function handleTelegramCommand(text, chatId, bot) {
       stopSecurityCheck();
       await bot.sendMessage(chatId, "Security check dimatikan.");
     }
+  } else if (text.startsWith("/hapusjadwal")) {
+    // Format: /hapusjadwal kolam1 jadwal2
+    const [_, kolam, jadwalKey] = text.split(" ");
+    if (!kolam || !jadwalKey) {
+      await bot.sendMessage(chatId, "Format salah. Gunakan: /hapusjadwal <kolam> <jadwalKey> (contoh: /hapusjadwal kolam1 jadwal2)");
+      return;
+    }
+    try {
+      await deleteSchedule(kolam, jadwalKey);
+      await bot.sendMessage(chatId, `Jadwal ${jadwalKey} untuk ${kolam} berhasil dihapus.`);
+    } catch (err) {
+      await bot.sendMessage(chatId, `Gagal menghapus jadwal: ${err.message}`);
+    }
+
   } else if (text.startsWith("/help")) {
     const helpMessage = `
 Daftar Command:
@@ -35,7 +49,9 @@ Daftar Command:
 /lihatjadwal                 - Lihat jadwal dalam format mudah dibaca
 /security on                 - Aktifkan security check
 /security off                - Matikan security check
+/cekpakan                    - Cek kapasitas pakan (gunakan /cekpakan A atau /cekpakan B)  
 /help                        - Lihat daftar command
+/hapusjadwal <kolam> <jadwal> - Hapus jadwal (contoh: /hapusjadwal kolam1 jadwal2)
     `;
     await bot.sendMessage(chatId, helpMessage);
   }else if (text.startsWith("/cekpakan")) {

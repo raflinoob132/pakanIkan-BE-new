@@ -20,15 +20,24 @@ app.listen(PORT, async () => {
   await initTelegramBot();
   await startScheduler();
   //await checkSecurity();
+  resetJadwalSetiapHari(); // panggil sekali di awal
+
 })
 
-setInterval(async () => {
-  const now = new Date();
-  if (now.getHours() === 18 && now.getMinutes() === 0) {
-    await resetCurrentTimeAll();
-    console.log("Jadwal currentTime direset ke defaultTime jam 18:00");
-  }
-}, 40 * 1000);
+async function resetJadwalSetiapHari() {
+  setInterval(async () => {
+    const now = new Date();
+    // Ambil jam dan menit UTC
+    const jamUTC = now.getUTCHours();
+    const menitUTC = now.getUTCMinutes();
+
+    // Reset hanya pada jam 11:00 UTC (setara 18:00 WIB)
+    if (jamUTC === 11 && menitUTC === 0) {
+      await resetCurrentTimeAll(); // ganti dengan fungsi reset jadwal Anda
+      console.log("Jadwal direset otomatis pada 18:00 WIB (11:00 UTC)");
+    }
+  }, 55 * 1000); // cek setiap menit
+}
 app.post("/uploadFood", express.raw({ type: "image/jpeg", limit: "5mb" }), uploadFishFoodImageToGCS);
 
 

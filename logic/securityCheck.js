@@ -15,7 +15,10 @@ async function checkSecurity() {
     sensor1: "180,90",
     sensor2: "0,90"
   };
-
+  const servoCommandsSecond = {
+    sensor1: "135,90",      // sudut kedua sensor1
+    sensor2: "45,90"        // sudut kedua sensor2
+  };
   let adaAncaman = false;
 
   for (const sensor in sensors) {
@@ -31,6 +34,8 @@ async function checkSecurity() {
       await db.ref(`AncamanKeamananAktif/${sensor}`).set(true);
 
       await moveServoAndTakePhoto(servoCommand, "keamanan");
+      await moveServoAndTakePhoto(servoCommandsSecond[sensor], "keamanan");
+
       await sendTelegramMessage(`Ancaman terdeteksi di ${sensor}. Proses pengambilan gambar dilakukan`);
 
       // Reset nilai PIR ke 0 setelah 20 detik

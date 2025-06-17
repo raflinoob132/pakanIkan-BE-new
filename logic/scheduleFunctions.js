@@ -42,5 +42,16 @@ async function getSchedule() {
   const snapshot = await db.ref("feedingSchedules").once("value");
   return snapshot.val();
 }
+/**
+ * Hapus jadwal ke-x pada kolam tertentu.
+ * @param {string} kolam - Nama kolam (misal: "kolam1")
+ * @param {string} jadwalKey - Key jadwal (misal: "jadwal1", "jadwal2", dst)
+ */
+async function deleteSchedule(kolam, jadwalKey) {
+  if (!["jadwal1", "jadwal2", "jadwal3", "jadwal4"].includes(jadwalKey)) {
+    throw new Error("Hanya bisa menghapus jadwal1 sampai jadwal4.");
+  }
+  await db.ref(`feedingSchedules/${kolam}/${jadwalKey}`).remove();
+}
 
-module.exports = { setSchedule, getSchedule };
+module.exports = { setSchedule, getSchedule, deleteSchedule };
