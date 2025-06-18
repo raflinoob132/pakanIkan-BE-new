@@ -1,4 +1,4 @@
-const { setSchedule, getSchedule } = require("./scheduleFunctions");
+const { setSchedule, getSchedule,deleteSchedule } = require("./scheduleFunctions");
 const { startSecurityCheck, stopSecurityCheck, securityActive } = require("../logic/securityActivation");
 const { viewSchedule } = require("./viewSchedule"); // Tambahkan ini
 const { checkFoodCapacity } = require("./checkFoodCapacity"); // Tambahkan ini
