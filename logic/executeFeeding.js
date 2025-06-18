@@ -112,10 +112,10 @@ async function executeFeeding(kolam, jadwalKey) {
         }
         return; // Stop jika sudah habis
       }
-      await delay(20000);
+      await delay(15 * 60 * 1000);
     }
     
-    await delay(5000); // Tambahkan jeda 5 detik sebelum pengecekan ulang
+    await delay(5 * 60 * 1000); // Tambahkan jeda 5 menit sebelum pengecekan ulang
     // Jika setelah 3x looping makananHabis masih false, lakukan pengecekan 1 menit sekali sebanyak 4 kali
     if (!makananHabis) {
   
@@ -144,10 +144,10 @@ async function executeFeeding(kolam, jadwalKey) {
           }
           break; // Stop jika sudah habis
         }
-        await delay(20000); // 20 detik
+        await delay(25 * 60 * 1000); // 25 menit
       }
     }
-  }, 15000);
+  }, 15 * 60 * 1000);
 }
 
 
