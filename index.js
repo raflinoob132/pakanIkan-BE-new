@@ -7,6 +7,7 @@ const express = require("express");
 const { initTelegramBot, bot, chatId } = require("./telegram/botHandler");
 const { startScheduler } = require("./scheduler/scheduler");
 const { resetCurrentTimeAll } = require("./logic/resetCurrentTime");
+const {startEsp32StatusMonitor} = require("./logic/monitorESP");
 //const { checkSecurity } = require("./logic/securityCheck");
 const app = express();
 
@@ -21,6 +22,7 @@ app.listen(PORT, async () => {
   await startScheduler();
   //await checkSecurity();
   resetJadwalSetiapHari(); // panggil sekali di awal
+  startEsp32StatusMonitor(); // panggil sekali di awal aplikasi
 
 })
 

@@ -27,7 +27,7 @@ async function setSchedule(kolam, jadwalKey, time, isDefault = false) {
     await ref.set({
       defaultTime: timeUTC,
       currentTime: timeUTC,
-      duration: 0.25,
+      duration: 10,
       doneToday: false
     });
   } else {

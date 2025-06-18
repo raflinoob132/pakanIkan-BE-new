@@ -28,7 +28,17 @@ async function checkFoodCapacity(kotak) {
   const kapasitas = valueSnap.val();
 
   // 4. Kirim hasil ke Telegram
-  await sendTelegramMessage(`Kapasitas pakan pada kotak ${kotak}: ${kapasitas} cm`);
+  let status = "";
+  if (kapasitas <= 10) {
+    status = "PENUH";
+  } else if (kapasitas >= 11 && kapasitas <= 16) {
+    status = "SEDANG";
+  } else if (kapasitas >= 17) {
+    status = "SEDIKIT";
+  } else {
+    status = "TIDAK DIKETAHUI";
+  }
+  await sendTelegramMessage(`Kapasitas pakan pada kotak ${kotak}: ${status}`);
 
   //return kapasitas;
 }
