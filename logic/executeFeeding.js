@@ -33,7 +33,7 @@ async function executeFeeding(kolam, jadwalKey) {
   // Ambil semua jadwal kolam
   const snapshot = await db.ref(`feedingSchedules/${kolam}`).once("value");
   const jadwalList = snapshot.val();
-  let duration = jadwalList[jadwalKey]?.duration || 10;
+  let duration = jadwalList[jadwalKey]?.duration || 4;
 
   // Urutkan key jadwal secara numerik
   const sortedKeys = Object.keys(jadwalList).sort((a, b) => {
@@ -82,11 +82,11 @@ async function executeFeeding(kolam, jadwalKey) {
   // Tambahkan jeda 15 detik sebelum proses pengecekan makanan
 // ...existing code sebelum setTimeout...
 
-// Tambahkan jeda 15 detik sebelum proses pengecekan makanan
+// Tambahkan jeda 15 menit sebelum proses pengecekan makanan
   setTimeout(async () => {
     let makananHabis = false;
 
-    // Looping 20 detik sekali sebanyak 3 kali
+    // Looping 15 menit sekali sekali sebanyak 3 kali
     for (let i = 0; i < 3; i++) {
       await sendTelegramMessage(`Menggerakkan servo untuk ${kolam} iterasi ke ${i + 1}`);
       await moveServoAndTakePhoto(servoCommand, "makanan").catch((err) =>
