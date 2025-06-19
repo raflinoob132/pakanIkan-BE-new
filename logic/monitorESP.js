@@ -1,7 +1,14 @@
-const { db } = require("../config/firebase");
-const { sendTelegramMessage } = require("../telegram/telegramUtils");
-
+// monitorESP.js
 let lastSeenPrev = null;
+let notifEsp32Down = true; // default: notifikasi aktif
+
+function setEsp32NotifStatus(status) {
+  notifEsp32Down = status;
+}
+
+function getEsp32NotifStatus() {
+  return notifEsp32Down;
+}
 
 function startEsp32StatusMonitor() {
   setInterval(async () => {
@@ -9,8 +16,10 @@ function startEsp32StatusMonitor() {
       const snapshot = await db.ref("deviceStatus/esp32_last_seen").once("value");
       const lastSeenNow = snapshot.val();
 
-      if (lastSeenPrev !== null && lastSeenNow === lastSeenPrev) {
-        await sendTelegramMessage("⚠️ ESP32 kemungkinan down! Nilai esp32_last_seen tidak berubah.");
+      if (lastSeenPrev !== null && lastSeenNow === lastSeenPrev && notifEsp32Down) {
+        await sendTelegramMessage(
+          "⚠️ ESP32 kemungkinan down! Nilai esp32_last_seen tidak berubah.\n\nKetik /espnotif off untuk mematikan notifikasi ini."
+        );
       }
 
       lastSeenPrev = lastSeenNow;
@@ -20,4 +29,4 @@ function startEsp32StatusMonitor() {
   }, 30000); // setiap 30 detik
 }
 
-module.exports = { startEsp32StatusMonitor };
+module.exports = { startEsp32StatusMonitor, setEsp32NotifStatus, getEsp32NotifStatus };

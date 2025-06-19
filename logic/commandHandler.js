@@ -3,6 +3,8 @@ const { startSecurityCheck, stopSecurityCheck, securityActive } = require("../lo
 const { viewSchedule } = require("./viewSchedule"); // Tambahkan ini
 const { checkFoodCapacity } = require("./checkFoodCapacity"); // Tambahkan ini
 const { moveServoAndTakePhoto } = require("./servoHandler"); // Pastikan ini sudah ada
+const { setEsp32NotifStatus, getEsp32NotifStatus } = require("./monitorESP");
+
 async function handleTelegramCommand(text, chatId, bot) {
   if (text.startsWith("/set")) {
     // Format: /set kolam1 jadwal2 08:00
@@ -52,7 +54,8 @@ Daftar Command:
 /cekpakan                    - Cek kapasitas pakan (gunakan /cekpakan A atau /cekpakan B)  
 /help                        - Lihat daftar command
 /hapusjadwal <kolam> <jadwal> - Hapus jadwal (contoh: /hapusjadwal kolam1 jadwal2)
-    `;
+/espnotif on|off              - Aktifkan/matikan notifikasi ESP32 down    
+`;
     await bot.sendMessage(chatId, helpMessage);
   }else if (text.startsWith("/cekpakan")) {
     const [, kotak] = text.split(" ");
@@ -74,6 +77,18 @@ Daftar Command:
       .catch(err => bot.sendMessage(chatId, "moveServoAndTakePhoto kedua error: " + err.message));
 
   // ...existing code...
+  } else if (text.startsWith("/espnotif")) {
+    // /espnotif off atau /espnotif on
+    const [, param] = text.split(" ");
+    if (param === "off") {
+      setEsp32NotifStatus(false);
+      await bot.sendMessage(chatId, "Notifikasi ESP32 down dimatikan.");
+    } else if (param === "on") {
+      setEsp32NotifStatus(true);
+      await bot.sendMessage(chatId, "Notifikasi ESP32 down diaktifkan.");
+    } else {
+      await bot.sendMessage(chatId, `Status notifikasi ESP32 saat ini: ${getEsp32NotifStatus() ? "AKTIF" : "NONAKTIF"}.\nGunakan /espnotif on atau /espnotif off.`);
+    }
   } else {
     await bot.sendMessage(chatId, "Perintah tidak dikenal. Gunakan /help untuk melihat daftar command.");
   }
