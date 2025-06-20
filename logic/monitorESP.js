@@ -1,4 +1,6 @@
 // monitorESP.js
+const { db } = require("../config/firebase");
+const { sendTelegramMessage } = require("../telegram/telegramUtils");
 let lastSeenPrev = null;
 let notifEsp32Down = true; // default: notifikasi aktif
 
