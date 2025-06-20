@@ -15,12 +15,12 @@ async function executeFeeding(kolam, jadwalKey) {
   switch (kolam) {
     case "kolam1":
       motorKey = "motorA";
-      servoCommand = "150,170";
+      servoCommand = "150,130";
       kotakPakan = "A";
       break;
     case "kolam2":
       motorKey = "motorB";
-      servoCommand = "40,170";
+      servoCommand = "40,130";
       kotakPakan = "B";
       break;
     default:
