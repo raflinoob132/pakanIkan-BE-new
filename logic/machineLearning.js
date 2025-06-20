@@ -30,19 +30,37 @@ async function processImage(buffer, fileName) {
       console.log('[DEBUG] Hasil deteksi dari Python:', stdout);
 
       // Ambil hanya bagian JSON dari output Python
-      const jsonMatch = stdout.match(/\[\s*{[\s\S]*}\s*\]/);
-      if (!jsonMatch) {
-        console.error('[DEBUG] Tidak menemukan JSON pada output:', stdout);
-        return reject(new Error('No JSON found in Python output'));
-      }
+ // Ambil hanya bagian JSON dari output Python (termasuk array kosong [])
+const jsonMatch = stdout.match(/\[[\s\S]*?\]/);
+if (!jsonMatch) {
+  console.error('[DEBUG] Tidak menemukan JSON pada output:', stdout);
+  return reject(new Error('No JSON found in Python output'));
+}
 
-      let detectedFishFoodCount = 0;
-      try {
-        detectedFishFoodCount = countFishFood(jsonMatch[0]);
-      } catch (parseErr) {
-        console.error('[DEBUG] Gagal parsing hasil deteksi:', parseErr, jsonMatch[0]);
-        return reject(parseErr);
-      }
+// Tangani jika JSON kosong (tidak ada deteksi)
+let detectedFishFoodCount = 0;
+let objects = [];
+try {
+  objects = JSON.parse(jsonMatch[0]);
+  if (Array.isArray(objects) && objects.length === 0) {
+    // Tidak ada pakan terdeteksi
+    let statusMessage = 'Pakan habis/hampir habis';
+    let makananHabis = true;
+    try {
+      await sendTelegramImage(
+        `https://storage.googleapis.com/pakan-ikan123/${fileName}`,
+        `Hasil deteksi objek: ${statusMessage}`
+      );
+    } catch (sendErr) {
+      console.error('[DEBUG] Gagal kirim gambar ke Telegram:', sendErr);
+    }
+    return resolve({ detectedFishFoodCount: 0, statusMessage, makananHabis });
+  }
+  detectedFishFoodCount = countFishFood(jsonMatch[0]);
+} catch (parseErr) {
+  console.error('[DEBUG] Gagal parsing hasil deteksi:', parseErr, jsonMatch[0]);
+  return reject(parseErr);
+}
 
       let statusMessage = 'Pakan masih banyak';
       let makananHabis = false;
