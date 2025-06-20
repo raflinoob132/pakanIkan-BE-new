@@ -12,12 +12,12 @@ async function checkSecurity() {
   }
 
   const servoCommands = {
-    sensor1: "180,90",
-    sensor2: "0,90"
+    sensor1: "180,80",
+    sensor2: "0,80"
   };
   const servoCommandsSecond = {
-    sensor1: "135,90",      // sudut kedua sensor1
-    sensor2: "45,90"        // sudut kedua sensor2
+    sensor1: "135,80",      // sudut kedua sensor1
+    sensor2: "45,80"        // sudut kedua sensor2
   };
   let adaAncaman = false;
 
