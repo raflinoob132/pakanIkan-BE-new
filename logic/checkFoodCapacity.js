@@ -31,9 +31,9 @@ async function checkFoodCapacity(kotak) {
   let status = "";
   if (kapasitas <= 10) {
     status = "PENUH";
-  } else if (kapasitas >= 11 && kapasitas <= 16) {
+  } else if (kapasitas > 10 && kapasitas <= 16) {
     status = "SEDANG";
-  } else if (kapasitas >= 17) {
+  } else if (kapasitas >16) {
     status = "SEDIKIT";
   } else {
     status = "TIDAK DIKETAHUI";
