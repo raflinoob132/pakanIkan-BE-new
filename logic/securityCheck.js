@@ -43,7 +43,7 @@ async function checkSecurity() {
         await db.ref(`JarakKeamanan/${sensor}`).set(0);
         await db.ref(`AncamanKeamananAktif/${sensor}`).set(false);
         console.log(`Reset sensor ${sensor} ke 0 setelah 20 detik.`);
-      }, 20000);
+      }, 7000);
 
     } else if (pirValue === 0 && flagAktif) {
       await db.ref(`AncamanKeamananAktif/${sensor}`).set(false);
