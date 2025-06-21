@@ -21,7 +21,7 @@ async function startSecurityCheck() {
     checkSecurity();
     securityInterval = setInterval(() => {
       checkSecurity();
-    }, 5000);
+    }, 500);
     console.log("Security check activated.");
   }
 }

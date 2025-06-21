@@ -34,7 +34,7 @@ async function startScheduler() {
           if (kolam === "kolam1") {
             servoCommand = "150,130";
           } else if (kolam === "kolam2") {
-            servoCommand = "40,130";
+            servoCommand = "40,140";
           }
           // Panggil moveServoAndTakePhoto sebelum cek ML
           if (servoCommand) {

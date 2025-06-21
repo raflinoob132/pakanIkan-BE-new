@@ -7,8 +7,7 @@ const { askUserTerminalFood } = require("./mlSimulation");
 const { processImage } = require("./machineLearning");
 const {getLatestPhotoFromGCS} = require("./uploadFishFood");
 const {checkFoodCapacity} = require("./checkFoodCapacity");
-async function executeFeeding(kolam, jadwalKey) {
-  let motorKey;
+async function executeFeeding(kolam, jadwalKey, sudahFeedingTambahan = false){
   let servoCommand;
   let kotakPakan;
 
@@ -20,7 +19,7 @@ async function executeFeeding(kolam, jadwalKey) {
       break;
     case "kolam2":
       motorKey = "motorB";
-      servoCommand = "40,130";
+      servoCommand = "40,140";
       kotakPakan = "B";
       break;
     default:
@@ -83,42 +82,45 @@ async function executeFeeding(kolam, jadwalKey) {
 // ...existing code sebelum setTimeout...
 
 // Tambahkan jeda 15 menit sebelum proses pengecekan makanan
-  setTimeout(async () => {
+setTimeout(async () => {
     let makananHabis = false;
 
-    // Looping 15 menit sekali sekali sebanyak 3 kali
-    for (let i = 0; i < 3; i++) {
-      await sendTelegramMessage(`Menggerakkan servo untuk ${kolam} iterasi ke ${i + 1}`);
-      await moveServoAndTakePhoto(servoCommand, "makanan").catch((err) =>
-        console.error(`Error pada iterasi ${i + 1}:`, err)
-      );
-      console.log(`[DEBUG] Selesai moveServoAndTakePhoto untuk ${kolam}`);
+    // Looping 15 menit sekali sebanyak 3 kali (hanya jika belum pernah feeding tambahan)
+    if (!sudahFeedingTambahan) {
+      for (let i = 0; i < 3; i++) {
+        await sendTelegramMessage(`Menggerakkan servo untuk ${kolam} iterasi ke ${i + 1}`);
+        await moveServoAndTakePhoto(servoCommand, "makanan").catch((err) =>
+          console.error(`Error pada iterasi ${i + 1}:`, err)
+        );
+        console.log(`[DEBUG] Selesai moveServoAndTakePhoto untuk ${kolam}`);
 
-      const latestPhoto = await getLatestPhotoFromGCS('pakan-ikan123');
-      if (latestPhoto) {
-        const result = await processImage(latestPhoto.buffer, latestPhoto.fileName);
-        makananHabis = result.makananHabis;
-        console.log(`[DEBUG] Hasil ML: makananHabis = ${makananHabis}, count = ${result.detectedFishFoodCount}`);
-      } else {
-        console.log('[DEBUG] Tidak ada foto terbaru di GCS, skip pengecekan ML.');
-      }
-
-      if (makananHabis) {
-        console.log(`Makanan di kolam ${kolam} habis pada iterasi ${i + 1}.`);
-        try {
-          await executeFeeding(kolam, jadwalKey);
-        } catch (err) {
-          console.error(`Gagal menjalankan executeFeeding ulang untuk ${kolam} pada ${jadwalKey}:`, err);
+        const latestPhoto = await getLatestPhotoFromGCS('pakan-ikan123');
+        if (latestPhoto) {
+          const result = await processImage(latestPhoto.buffer, latestPhoto.fileName);
+          makananHabis = result.makananHabis;
+          console.log(`[DEBUG] Hasil ML: makananHabis = ${makananHabis}, count = ${result.detectedFishFoodCount}`);
+        } else {
+          console.log('[DEBUG] Tidak ada foto terbaru di GCS, skip pengecekan ML.');
         }
-        return; // Stop jika sudah habis
+
+        if (makananHabis) {
+          console.log(`Makanan di kolam ${kolam} habis pada iterasi ${i + 1}.`);
+          try {
+            // Pemanggilan berikutnya: sudahFeedingTambahan = true
+            await executeFeeding(kolam, jadwalKey, true);
+          } catch (err) {
+            console.error(`Gagal menjalankan executeFeeding ulang untuk ${kolam} pada ${jadwalKey}:`, err);
+          }
+          return; // Stop jika sudah habis
+        }
+        await delay(15 * 60 * 1000);
       }
-      await delay(15 * 60 * 1000);
     }
-    
+
     await delay(5 * 60 * 1000); // Tambahkan jeda 5 menit sebelum pengecekan ulang
+
     // Jika setelah 3x looping makananHabis masih false, lakukan pengecekan 1 menit sekali sebanyak 4 kali
-    if (!makananHabis) {
-  
+    // if (!makananHabis) {
       for (let j = 0; j < 4; j++) {
         await sendTelegramMessage(`Pengecekan ulang makanan di kolam ${kolam} (interval ke-${j + 1}, tiap 1 menit)`);
         await moveServoAndTakePhoto(servoCommand, "makanan").catch((err) =>
@@ -136,17 +138,13 @@ async function executeFeeding(kolam, jadwalKey) {
         }
 
         if (makananHabis) {
-          console.log(`Makanan di kolam ${kolam} habis pada pengecekan ulang ke-${j + 1}.`);
-          try {
-            await executeFeeding(kolam, jadwalKey);
-          } catch (err) {
-            console.error(`Gagal menjalankan executeFeeding ulang untuk ${kolam} pada ${jadwalKey}:`, err);
-          }
-          break; // Stop jika sudah habis
+          // Hanya notifikasi, tidak ada feeding lagi!
+          await sendTelegramMessage(`Pakan di kolam ${kolam} benar-benar habis setelah pengecekan ulang ke-${j + 1}. Silakan isi ulang pakan!`);
+          break; // Stop loop jika sudah habis
         }
-        await delay(25 * 60 * 1000); // 25 menit
+        await delay(1 * 60 * 1000); // 1 menit
       }
-    }
+    //}
   }, 15 * 60 * 1000);
 }
 
