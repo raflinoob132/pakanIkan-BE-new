@@ -151,7 +151,7 @@ setTimeout(async () => {
 
         if (makananHabis) {
           // Hanya notifikasi, tidak ada feeding lagi!
-          await sendTelegramMessage(`Pakan di kolam ${kolam} benar-benar habis setelah pengecekan ulang ke-${j + 1}. Silakan isi ulang pakan!`);
+          await sendTelegramMessage(`Pakan di kolam ${kolam} habis/sedikit setelah pengecekan ulang ke-${j + 1}.`);
           break; // Stop loop jika sudah habis
         }
         await delay(1 * 60 * 1000); // 1 menit
