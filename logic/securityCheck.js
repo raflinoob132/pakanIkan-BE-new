@@ -47,9 +47,10 @@ try{
 
       // Reset nilai PIR ke 0 setelah 20 detik
       setTimeout(async () => {
+        await db.ref(`JarakKeamanan/${sensor}`).set(0);
+
         await db.ref(`AncamanKeamananAktif/${sensor}`).set(false);
 
-        await db.ref(`JarakKeamanan/${sensor}`).set(0);
         console.log(`Reset sensor ${sensor} ke 0 setelah 20 detik.`);
       }, 7000);
 
