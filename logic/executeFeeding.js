@@ -74,7 +74,19 @@ async function executeFeeding(kolam, jadwalKey, sudahFeedingTambahan = false){
   });
 
   console.log(`Motor untuk ${kolam} telah dikembalikan ke 0.`);
+  await moveServoAndTakePhoto(servoCommand, "makanan").catch((err) =>
+    console.error(`Error saat menggerakkan servo untuk ${kolam}:`, err)
+  );
 
+  // mengecek sekali setelah memberi pakan
+  const latestPhoto = await getLatestPhotoFromGCS('pakan-ikan123');
+  if (latestPhoto) {
+    const result = await processImage(latestPhoto.buffer, latestPhoto.fileName);
+    makananHabis = result.makananHabis;
+    console.log(`[DEBUG] Hasil ML: makananHabis = ${makananHabis}, count = ${result.detectedFishFoodCount}`);
+  } else {
+    console.log('[DEBUG] Tidak ada foto terbaru di GCS, skip pengecekan ML.');
+  }
   // Cek kapasitas pakan setelah motor kembali ke 0
   await checkFoodCapacity(kotakPakan);
 
