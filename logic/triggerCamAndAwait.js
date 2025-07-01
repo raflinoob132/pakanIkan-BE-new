@@ -1,0 +1,295 @@
+const { db } = require("../config/firebase");
+const { getLatestPhotoFromGCS } = require("./uploadFishFood");
+
+// ============= QUEUE SYSTEM =============
+class CameraFeedingQueue {
+  constructor() {
+    this.queue = [];
+    this.processing = false;
+    this.currentRequestId = null;
+  }
+
+  // Tambah request ke antrian
+  async addRequest(servoCommand) {
+    return new Promise((resolve, reject) => {
+      const requestId = Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+      
+      const request = {
+        id: requestId,
+        servoCommand,
+        resolve,
+        reject,
+        timestamp: Date.now()
+      };
+
+      this.queue.push(request);
+      console.log(`Request ${requestId} ditambahkan ke antrian. Queue length: ${this.queue.length}`);
+      
+      // Mulai pemrosesan jika belum jalan
+      this.processQueue();
+    });
+  }
+
+  // Proses antrian satu per satu
+  async processQueue() {
+    if (this.processing || this.queue.length === 0) {
+      return;
+    }
+
+    this.processing = true;
+    
+    while (this.queue.length > 0) {
+      const request = this.queue.shift();
+      this.currentRequestId = request.id;
+      
+      console.log(`Memproses request ${request.id} - Servo: ${request.servoCommand}`);
+      
+      try {
+        // Cek apakah ESP32 sedang sibuk
+        const busyCheck = await this.checkESP32Status();
+        if (busyCheck.isBusy) {
+          throw new Error(`ESP32 sedang sibuk: ${busyCheck.reason}`);
+        }
+
+        // Eksekusi request
+        const result = await this.executeRequest(request);
+        request.resolve(result);
+        
+        console.log(`Request ${request.id} berhasil diproses`);
+        
+      } catch (error) {
+        console.error(`Request ${request.id} gagal:`, error.message);
+        request.reject(error);
+      }
+      
+      // Delay antar request untuk mencegah overload
+      await this.delay(2000);
+    }
+    
+    this.processing = false;
+    this.currentRequestId = null;
+    console.log("Semua request dalam antrian selesai diproses");
+  }
+
+  // Cek status ESP32 sebelum kirim command
+  async checkESP32Status() {
+    try {
+      // Cek apakah sedang memproses
+      const statusSnap = await db.ref("deviceStatus/camera_busy").once("value");
+      const isCameraBusy = statusSnap.val() === true || statusSnap.val() === "true";
+      
+      if (isCameraBusy) {
+        return { isBusy: true, reason: "Camera sedang digunakan" };
+      }
+
+      // Cek apakah ada command yang belum diproses
+      const commandSnap = await db.ref("checkCameraMoveCommand/status").once("value");
+      const commandStatus = commandSnap.val();
+      
+      if (commandStatus === 1) {
+        return { isBusy: true, reason: "Masih ada command yang belum selesai" };
+      }
+
+      // Cek heartbeat ESP32 (dalam 30 detik terakhir)
+      const heartbeatSnap = await db.ref("deviceStatus/esp32_last_seen").once("value");
+      const lastSeen = heartbeatSnap.val();
+      
+      if (!lastSeen || (Date.now()/1000 - lastSeen) > 30) {
+        return { isBusy: true, reason: "ESP32 tidak responsif" };
+      }
+
+      return { isBusy: false };
+    } catch (error) {
+      return { isBusy: true, reason: `Error checking status: ${error.message}` };
+    }
+  }
+
+  // Eksekusi request individual dengan timeout dan retry
+  async executeRequest(request, maxRetries = 2) {
+    let lastError;
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`Request ${request.id} - Percobaan ${attempt}/${maxRetries}`);
+        
+        // 1. Kirim perintah dengan timestamp unik
+        const commandId = request.id;
+        await db.ref("checkCameraMoveCommand").set({
+          commandId: commandId,
+          moveServo: request.servoCommand,
+          status: 1,
+          timestamp: Date.now()
+        });
+
+        console.log(`Command sent for ${request.id}: ${request.servoCommand}`);
+
+        // 2. Tunggu sampai selesai dengan monitoring
+        const result = await this.waitForCompletion(commandId);
+        
+        // 3. Bersihkan command
+        await db.ref("checkCameraMoveCommand").set({
+          commandId: null,
+          moveServo: null,
+          status: 0,
+          timestamp: null
+        });
+
+        return result;
+        
+      } catch (error) {
+        lastError = error;
+        console.error(`Request ${request.id} attempt ${attempt} failed:`, error.message);
+        
+        if (attempt < maxRetries) {
+          console.log(`Retry dalam 3 detik...`);
+          await this.delay(3000);
+        }
+      }
+    }
+    
+    throw lastError;
+  }
+
+  // Tunggu completion dengan monitoring detail
+  async waitForCompletion(commandId, maxWait = 35000) {
+    const startTime = Date.now();
+    let waited = 0;
+    const interval = 1000;
+    let lastStatus = null;
+    
+    console.log(`Menunggu completion untuk command ${commandId}...`);
+
+    while (waited < maxWait) {
+      try {
+        // 1. Cek status command
+        const snap = await db.ref("checkCameraMoveCommand").once("value");
+        const commandData = snap.val();
+        
+        if (!commandData) {
+          throw new Error("Command data hilang dari database");
+        }
+
+        // Pastikan ini command kita
+        if (commandData.commandId !== commandId) {
+          throw new Error(`Command ID mismatch. Expected: ${commandId}, Got: ${commandData.commandId}`);
+        }
+
+        const currentStatus = commandData.status;
+        
+        // Log perubahan status
+        if (currentStatus !== lastStatus) {
+          console.log(`Command ${commandId} status: ${lastStatus} -> ${currentStatus}`);
+          lastStatus = currentStatus;
+        }
+
+        // 2. Jika status = 0, berarti ESP32 sudah selesai
+        if (currentStatus === 0) {
+          console.log(`Command ${commandId} completed. Checking for photo...`);
+          
+          // 3. Cek foto terbaru
+          const latestPhoto = await getLatestPhotoFromGCS('pakan-ikan123');
+          
+          if (latestPhoto) {
+            // Validasi foto (harus baru)
+            const photoTime = new Date(latestPhoto.timeCreated);
+            const commandTime = new Date(startTime);
+            
+            if (photoTime >= commandTime) {
+              console.log(`Photo validated for command ${commandId}: ${latestPhoto.name}`);
+              return latestPhoto;
+            } else {
+              console.log(`Photo too old for command ${commandId}. Waiting for newer photo...`);
+            }
+          }
+        }
+
+        // 4. Cek status ESP32
+        const deviceSnap = await db.ref("deviceStatus").once("value");
+        const deviceStatus = deviceSnap.val();
+        
+        if (deviceStatus && deviceStatus.camera_busy === "false") {
+          // ESP32 bilang tidak busy tapi status masih 1? Ada masalah
+          if (currentStatus === 1 && waited > 10000) {
+            console.log(`Status inconsistency detected for ${commandId}. ESP32 not busy but command still pending.`);
+          }
+        }
+
+      } catch (error) {
+        console.error(`Error monitoring command ${commandId}:`, error.message);
+      }
+
+      await this.delay(interval);
+      waited += interval;
+    }
+
+    throw new Error(`Timeout waiting for command ${commandId} completion after ${maxWait}ms`);
+  }
+
+  // Utility delay function
+  delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  // Get queue status
+  getStatus() {
+    return {
+      queueLength: this.queue.length,
+      processing: this.processing,
+      currentRequestId: this.currentRequestId,
+      queuedRequests: this.queue.map(req => ({
+        id: req.id,
+        servoCommand: req.servoCommand,
+        timestamp: req.timestamp
+      }))
+    };
+  }
+
+  // Clear queue (emergency)
+  clearQueue() {
+    const rejectedCount = this.queue.length;
+    this.queue.forEach(req => {
+      req.reject(new Error("Queue cleared by admin"));
+    });
+    this.queue = [];
+    console.log(`Queue cleared. ${rejectedCount} requests rejected.`);
+    return rejectedCount;
+  }
+}
+
+// ============= SINGLETON INSTANCE =============
+const cameraQueue = new CameraFeedingQueue();
+
+// ============= PUBLIC API =============
+async function triggerCameraAndWait(servoCommand) {
+  console.log(`New camera request: ${servoCommand}`);
+  return await cameraQueue.addRequest(servoCommand);
+}
+
+// Admin functions
+function getQueueStatus() {
+  return cameraQueue.getStatus();
+}
+
+function clearQueue() {
+  return cameraQueue.clearQueue();
+}
+
+// ============= EXPORTS =============
+module.exports = { 
+  triggerCameraAndWait,
+  getQueueStatus,
+  clearQueue
+};
+
+// ============= OPTIONAL: Express Routes untuk Monitoring =============
+/*
+// Tambahkan ke express app untuk monitoring
+app.get('/api/camera-queue/status', (req, res) => {
+  res.json(getQueueStatus());
+});
+
+app.post('/api/camera-queue/clear', (req, res) => {
+  const cleared = clearQueue();
+  res.json({ message: `${cleared} requests cleared` });
+});
+*/

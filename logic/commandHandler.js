@@ -15,10 +15,11 @@ async function handleTelegramCommand(text, chatId, bot) {
     }
     await setSchedule(kolam, jadwalKey, time, true);
     await bot.sendMessage(chatId, `Jadwal ${jadwalKey} untuk ${kolam} disimpan pada ${time}`);
-  } else if (text.startsWith("/list")) {
-    const schedules = await getSchedule();
-    await bot.sendMessage(chatId, JSON.stringify(schedules, null, 2));
-  }else if (text.startsWith("/lihatjadwal")) {
+   } 
+  // else if (text.startsWith("/list")) {
+  //   const schedules = await getSchedule();
+  //   await bot.sendMessage(chatId, JSON.stringify(schedules, null, 2));
+    else if (text.startsWith("/lihatjadwal")) {
     const jadwalText = await viewSchedule();
     await bot.sendMessage(chatId, jadwalText);
   } else if (text.startsWith("/security")) {

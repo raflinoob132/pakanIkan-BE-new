@@ -1,37 +1,56 @@
-const { checkSecurity } = require("./securityCheck");
-// ...existing code...
 const { db } = require("../config/firebase");
 
-let securityInterval = null;
-let securityActive = false;
-
-async function resetAllJarakKeamanan() {
-  const snapshot = await db.ref("JarakKeamanan").once("value");
-  const sensors = snapshot.val();
-  if (sensors) {
-    for (const sensor in sensors) {
-      await db.ref(`JarakKeamanan/${sensor}`).set(0);
-    }
-  }
-}
+/**
+ * Aktifkan fungsi keamanan di ESP32
+ */
 async function startSecurityCheck() {
-  if (!securityActive) {
-    securityActive = true;
-    await resetAllJarakKeamanan(); // <-- reset ke 0 di awal aktivasi
-    checkSecurity();
-    securityInterval = setInterval(() => {
-      checkSecurity();
-    }, 1000);
-    console.log("Security check activated.");
-  }
+  await db.ref("cekKeamanan").set(1);
+  console.log("Security check activated (cekKeamanan=1).");
 }
 
-function stopSecurityCheck() {
-  if (securityActive) {
-    clearInterval(securityInterval);
-    securityActive = false;
-    console.log("Security check deactivated.");
-  }
+/**
+ * Nonaktifkan fungsi keamanan di ESP32
+ */
+async function stopSecurityCheck() {
+  await db.ref("cekKeamanan").set(0);
+  console.log("Security check deactivated (cekKeamanan=0).");
 }
 
-module.exports = { startSecurityCheck, stopSecurityCheck, securityActive };
+module.exports = { startSecurityCheck, stopSecurityCheck };
+// const { checkSecurity } = require("./securityCheck");
+// // ...existing code...
+// const { db } = require("../config/firebase");
+
+// let securityInterval = null;
+// let securityActive = false;
+
+// async function resetAllJarakKeamanan() {
+//   const snapshot = await db.ref("JarakKeamanan").once("value");
+//   const sensors = snapshot.val();
+//   if (sensors) {
+//     for (const sensor in sensors) {
+//       await db.ref(`JarakKeamanan/${sensor}`).set(0);
+//     }
+//   }
+// }
+// async function startSecurityCheck() {
+//   if (!securityActive) {
+//     securityActive = true;
+//     await resetAllJarakKeamanan(); // <-- reset ke 0 di awal aktivasi
+//     checkSecurity();
+//     securityInterval = setInterval(() => {
+//       checkSecurity();
+//     }, 1000);
+//     console.log("Security check activated.");
+//   }
+// }
+
+// function stopSecurityCheck() {
+//   if (securityActive) {
+//     clearInterval(securityInterval);
+//     securityActive = false;
+//     console.log("Security check deactivated.");
+//   }
+// }
+
+// module.exports = { startSecurityCheck, stopSecurityCheck, securityActive };
