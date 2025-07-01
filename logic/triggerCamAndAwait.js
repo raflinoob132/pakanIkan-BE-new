@@ -90,13 +90,13 @@ class CameraFeedingQueue {
         return { isBusy: true, reason: "Masih ada command yang belum selesai" };
       }
 
-      // Cek heartbeat ESP32 (dalam 30 detik terakhir)
-      const heartbeatSnap = await db.ref("deviceStatus/esp32_last_seen").once("value");
-      const lastSeen = heartbeatSnap.val();
+      // // Cek heartbeat ESP32 (dalam 30 detik terakhir)
+      // const heartbeatSnap = await db.ref("deviceStatus/esp32_last_seen").once("value");
+      // const lastSeen = heartbeatSnap.val();
       
-      if (!lastSeen || (Date.now()/1000 - lastSeen) > 30) {
-        return { isBusy: true, reason: "ESP32 tidak responsif" };
-      }
+      // if (!lastSeen || (Date.now()/1000 - lastSeen) > 30) {
+      //   return { isBusy: true, reason: "ESP32 tidak responsif" };
+      // }
 
       return { isBusy: false };
     } catch (error) {
