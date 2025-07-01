@@ -194,12 +194,13 @@ class CameraFeedingQueue {
             const photoTime = new Date(latestPhoto.timeCreated);
             const commandTime = new Date(startTime);
             
-            if (photoTime >= commandTime) {
-              console.log(`Photo validated for command ${commandId}: ${latestPhoto.name}`);
-              return latestPhoto;
-            } else {
-              console.log(`Photo too old for command ${commandId}. Waiting for newer photo...`);
-            }
+
+            console.log(`Photo validated for command ${commandId}: ${latestPhoto.name}`);
+            return latestPhoto;
+        
+            // else {
+            //   console.log(`Photo too old for command ${commandId}. Waiting for newer photo...`);
+            // }
           }
         }
 
