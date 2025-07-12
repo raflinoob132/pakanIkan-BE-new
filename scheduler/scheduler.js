@@ -34,7 +34,7 @@ async function startScheduler() {
           if (kolam === "kolam1") {
             servoCommand = "170,140";
           } else if (kolam === "kolam2") {
-            servoCommand = "35,150";
+            servoCommand = "35,140";
           }
           // Ganti moveServoAndTakePhoto dengan triggerCameraAndWait
           let latestPhoto = null;

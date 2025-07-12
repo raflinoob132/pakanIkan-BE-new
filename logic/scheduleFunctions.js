@@ -19,6 +19,14 @@ async function setSchedule(kolam, jadwalKey, time, isDefault = false) {
   // Kurangi 7 jam dari waktu user
   const timeUTC = subtract7Hours(time);
 
+  // Tentukan durasi otomatis berdasarkan kolam
+  let duration = 1; // Default
+  if (kolam === "kolamA") {
+    duration = 10;
+  } else if (kolam === "kolamB") {
+    duration = 1;
+  }
+
   const ref = db.ref(`feedingSchedules/${kolam}/${jadwalKey}`);
   const snapshot = await ref.once("value");
   const jadwal = snapshot.val();
@@ -27,7 +35,7 @@ async function setSchedule(kolam, jadwalKey, time, isDefault = false) {
     await ref.set({
       defaultTime: timeUTC,
       currentTime: timeUTC,
-      duration: 1,
+      duration: duration, // Durasi sesuai kolam
       doneToday: false
     });
   } else {

@@ -64,7 +64,7 @@ try {
 
       let statusMessage = 'Pakan masih banyak';
       let makananHabis = false;
-      if (detectedFishFoodCount <= 10) {
+      if (detectedFishFoodCount <= 5) {
         statusMessage = 'Pakan habis/hampir habis';
         makananHabis = true;
       }

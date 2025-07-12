@@ -19,7 +19,7 @@ async function executeFeeding(kolam, jadwalKey, sudahFeedingTambahan = false) {
       break;
     case "kolam2":
       motorKey = "motorB";
-      servoCommand = "35,150";
+      servoCommand = "35,140";
       kotakPakan = "B";
       break;
     default:
