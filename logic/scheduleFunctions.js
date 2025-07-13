@@ -21,9 +21,9 @@ async function setSchedule(kolam, jadwalKey, time, isDefault = false) {
 
   // Tentukan durasi otomatis berdasarkan kolam
   let duration = 1; // Default
-  if (kolam === "kolamA") {
+  if (kolam === "kolam1") {
     duration = 10;
-  } else if (kolam === "kolamB") {
+  } else if (kolam === "kolam2") {
     duration = 1;
   }
 
