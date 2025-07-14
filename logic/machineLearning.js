@@ -121,7 +121,7 @@ function countFishFood(detectedObjects) {
   const objects = JSON.parse(detectedObjects);
   let fishFoodCount = 0;
   objects.forEach(obj => {
-    if (obj.name === 'food') { // Ganti label sesuai model Anda
+    if (obj.name === 'pakan_ikan') { // Ganti label sesuai model Anda
       fishFoodCount += 1;
     }
   });
