@@ -26,7 +26,7 @@ async function handleTelegramCommand(text, chatId, bot) {
     const [, action] = text.split(" ");
     if (action === "on") {
       startSecurityCheck();
-      await bot.sendMessage(chatId, "Security check diaktifkan (setiap 5 detik).");
+      await bot.sendMessage(chatId, "Security check diaktifkan.");
     } else if (action === "off") {
       stopSecurityCheck();
       await bot.sendMessage(chatId, "Security check dimatikan.");
