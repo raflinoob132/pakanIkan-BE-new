@@ -4,7 +4,8 @@ const { viewSchedule } = require("./viewSchedule"); // Tambahkan ini
 const { checkFoodCapacity } = require("./checkFoodCapacity"); // Tambahkan ini
 const { moveServoAndTakePhoto } = require("./servoHandler"); // Pastikan ini sudah ada
 const { setEsp32NotifStatus, getEsp32NotifStatus } = require("./monitorESP");
-
+const { moveMotor } = require("./movemotor"); // Tambahkan ini
+const { triggerCameraAndWait } = require("./triggerCamAndAwait"); // Pastikan ini sudah ada
 async function handleTelegramCommand(text, chatId, bot) {
   if (text.startsWith("/set")) {
     // Format: /set kolam1 jadwal2 08:00
@@ -53,12 +54,14 @@ Daftar Command:
 /security on                 - Aktifkan security check
 /security off                - Matikan security check
 /cekpakan                    - Cek kapasitas pakan (gunakan /cekpakan A atau /cekpakan B)  
-/help                        - Lihat daftar command
 /hapusjadwal <kolam> <jadwal> - Hapus jadwal (contoh: /hapusjadwal kolam1 jadwal2)
-/espnotif on|off              - Aktifkan/matikan notifikasi ESP32 down    
+/ambilfoto <pilihan>         - Ambil foto posisi servo (pilihan: kolam1, kolam2, depan1, samping1, depan2, samping2)
+/beripakan <kolam> <durasi>  - Gerakkan motor pakan (contoh: /beripakan kolam1 5)
+/espnotif on|off             - Aktifkan/matikan notifikasi ESP32 down
+/help                        - Lihat daftar command
 `;
     await bot.sendMessage(chatId, helpMessage);
-  }else if (text.startsWith("/cekpakan")) {
+  } else if (text.startsWith("/cekpakan")) {
     const [, kotak] = text.split(" ");
     if (kotak !== "A" && kotak !== "B") {
       await bot.sendMessage(chatId, "Gunakan /cekpakan A atau /cekpakan B untuk mengecek kapasitas pakan.");
@@ -78,6 +81,71 @@ Daftar Command:
       .catch(err => bot.sendMessage(chatId, "moveServoAndTakePhoto kedua error: " + err.message));
 
   // ...existing code...
+  
+  } else if (text.startsWith("/ambilfoto")) {
+    // Format: /ambilfoto {pilihan}
+    const [, pilihan] = text.split(" ");
+    let servoCommand = null;
+    let label = "";
+    switch (pilihan) {
+      case "kolam1":
+        servoCommand = "170,140";
+        label = "Kolam 1";
+        break;
+      case "kolam2":
+        servoCommand = "35,140";
+        label = "Kolam 2";
+        break;
+      case "depan1":
+        servoCommand = "170,80";
+        label = "Depan Kolam 1";
+        break;
+      case "samping1":
+        servoCommand = "125,80";
+        label = "Samping Kolam 1";
+        break;
+      case "depan2":
+        servoCommand = "10,80";
+        label = "Depan Kolam 2";
+        break;
+      case "samping2":
+        servoCommand = "45,80";
+        label = "Samping Kolam 2";
+        break;
+      default:
+        await bot.sendMessage(chatId, "Pilihan tidak dikenal. Pilihan: kolam1, kolam2, depan1, samping1, depan2, samping2");
+        return;
+    }
+    await bot.sendMessage(chatId, `Mengambil foto pada posisi: ${label}...`);
+    try {
+      const latestPhoto = await triggerCameraAndWait(servoCommand);
+      if (latestPhoto && latestPhoto.publicUrl) {
+        await bot.sendPhoto(chatId, latestPhoto.publicUrl, { caption: `Foto posisi: ${label}` });
+      } else {
+        await bot.sendMessage(chatId, "Foto gagal diambil atau tidak ditemukan.");
+      }
+    } catch (err) {
+      await bot.sendMessage(chatId, `Gagal mengambil foto: ${err.message}`);
+    }
+  } else if (text.startsWith("/beripakan")) {
+    // Format: /beripakan kolam1 5
+    const [, kolam, durasiStr] = text.split(" ");
+    if (!kolam || !durasiStr) {
+      await bot.sendMessage(chatId, "Format salah. Gunakan: /beripakan kolam1 5 (atau kolam2 5)");
+      return;
+    }
+    const duration = parseInt(durasiStr, 10);
+    if ((kolam !== "kolam1" && kolam !== "kolam2") || isNaN(duration) || duration <= 0) {
+      await bot.sendMessage(chatId, "Kolam harus 'kolam1' atau 'kolam2' dan durasi harus angka > 0. Contoh: /beripakan kolam1 5");
+      return;
+    }
+    await bot.sendMessage(chatId, `Menggerakkan motor untuk ${kolam} selama ${duration} detik...`);
+    try {
+      await moveMotor(kolam, duration);
+      await bot.sendMessage(chatId, `Pemberian pakan untuk ${kolam} selama ${duration} detik selesai.`);
+    } catch (err) {
+      await bot.sendMessage(chatId, `Gagal memberi pakan: ${err.message}`);
+    }
   } else if (text.startsWith("/espnotif")) {
     // /espnotif off atau /espnotif on
     const [, param] = text.split(" ");
