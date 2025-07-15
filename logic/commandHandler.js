@@ -117,16 +117,17 @@ Daftar Command:
         return;
     }
     await bot.sendMessage(chatId, `Mengambil foto pada posisi: ${label}...`);
-    try {
-      const latestPhoto = await triggerCameraAndWait(servoCommand);
-      if (latestPhoto && latestPhoto.publicUrl) {
-        await bot.sendPhoto(chatId, latestPhoto.publicUrl, { caption: `Foto posisi: ${label}` });
-      } else {
-        await bot.sendMessage(chatId, "Foto gagal diambil atau tidak ditemukan.");
-      }
-    } catch (err) {
-      await bot.sendMessage(chatId, `Gagal mengambil foto: ${err.message}`);
-    }
+try {
+  const latestPhoto = await triggerCameraAndWait(servoCommand);
+  if (latestPhoto && latestPhoto.fileName) {
+    const publicUrl = `https://storage.googleapis.com/pakan-ikan123/${latestPhoto.fileName}`;
+    await bot.sendPhoto(chatId, publicUrl, { caption: `Foto posisi: ${label}` });
+  } else {
+    await bot.sendMessage(chatId, "Foto gagal diambil atau tidak ditemukan.");
+  }
+} catch (err) {
+  await bot.sendMessage(chatId, `Gagal mengambil foto: ${err.message}`);
+}
   } else if (text.startsWith("/beripakan")) {
     // Format: /beripakan kolam1 5
     const [, kolam, durasiStr] = text.split(" ");
