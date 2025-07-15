@@ -117,7 +117,11 @@ Daftar Command:
         return;
     }
     await bot.sendMessage(chatId, `Mengambil foto pada posisi: ${label}...`);
-    await triggerCameraAndWait(servoCommand, "usercommand");
+try {
+  await triggerCameraAndWait(servoCommand, "usercommand");
+} catch (err) {
+  await bot.sendMessage(chatId, `Gagal mengambil foto: ${err.message}`);
+}
 
   } else if (text.startsWith("/beripakan")) {
     // Format: /beripakan kolam1 5
