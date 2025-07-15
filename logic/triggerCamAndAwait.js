@@ -10,13 +10,14 @@ class CameraFeedingQueue {
   }
 
   // Tambah request ke antrian
-  async addRequest(servoCommand) {
+  async addRequest(servoCommand, purpose = "makanan") {
     return new Promise((resolve, reject) => {
       const requestId = Date.now() + '-' + Math.random().toString(36).substr(2, 9);
-      
+
       const request = {
         id: requestId,
         servoCommand,
+        purpose,
         resolve,
         reject,
         timestamp: Date.now()
@@ -24,7 +25,7 @@ class CameraFeedingQueue {
 
       this.queue.push(request);
       console.log(`Request ${requestId} ditambahkan ke antrian. Queue length: ${this.queue.length}`);
-      
+
       // Mulai pemrosesan jika belum jalan
       this.processQueue();
     });
@@ -104,51 +105,55 @@ class CameraFeedingQueue {
     }
   }
 
+
   // Eksekusi request individual dengan timeout dan retry
   async executeRequest(request, maxRetries = 2) {
     let lastError;
-    
+
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         console.log(`Request ${request.id} - Percobaan ${attempt}/${maxRetries}`);
-        
+
         // 1. Kirim perintah dengan timestamp unik
         const commandId = request.id;
         await db.ref("checkCameraMoveCommand").set({
           commandId: commandId,
           moveServo: request.servoCommand,
           status: 1,
-          timestamp: Date.now()
+          timestamp: Date.now(),
+          purpose: request.purpose // Tambahkan purpose ke database
         });
 
-        console.log(`Command sent for ${request.id}: ${request.servoCommand}`);
+        console.log(`Command sent for ${request.id}: ${request.servoCommand}, purpose: ${request.purpose}`);
 
         // 2. Tunggu sampai selesai dengan monitoring
         const result = await this.waitForCompletion(commandId);
-        
+
         // 3. Bersihkan command
         await db.ref("checkCameraMoveCommand").set({
           commandId: null,
           moveServo: null,
           status: 0,
-          timestamp: null
+          timestamp: null,
+          purpose: null
         });
 
         return result;
-        
+
       } catch (error) {
         lastError = error;
         console.error(`Request ${request.id} attempt ${attempt} failed:`, error.message);
-        
+
         if (attempt < maxRetries) {
           console.log(`Retry dalam 3 detik...`);
           await this.delay(3000);
         }
       }
     }
-    
+
     throw lastError;
   }
+
 
   // Tunggu completion dengan monitoring detail
   async waitForCompletion(commandId, maxWait = 35000) {
@@ -261,9 +266,9 @@ class CameraFeedingQueue {
 const cameraQueue = new CameraFeedingQueue();
 
 // ============= PUBLIC API =============
-async function triggerCameraAndWait(servoCommand) {
-  console.log(`New camera request: ${servoCommand}`);
-  return await cameraQueue.addRequest(servoCommand);
+async function triggerCameraAndWait(servoCommand, purpose = "makanan") {
+  console.log(`New camera request: ${servoCommand}, purpose: ${purpose}`);
+  return await cameraQueue.addRequest(servoCommand, purpose);
 }
 
 // Admin functions
@@ -281,7 +286,6 @@ module.exports = {
   getQueueStatus,
   clearQueue
 };
-
 // ============= OPTIONAL: Express Routes untuk Monitoring =============
 /*
 // Tambahkan ke express app untuk monitoring
