@@ -117,17 +117,21 @@ Daftar Command:
         return;
     }
     await bot.sendMessage(chatId, `Mengambil foto pada posisi: ${label}...`);
-try {
-  const latestPhoto = await triggerCameraAndWait(servoCommand);
-  if (latestPhoto && latestPhoto.fileName) {
-    const publicUrl = `https://storage.googleapis.com/pakan-ikan123/${latestPhoto.fileName}`;
-    await bot.sendPhoto(chatId, publicUrl, { caption: `Foto posisi: ${label}` });
-  } else {
-    await bot.sendMessage(chatId, "Foto gagal diambil atau tidak ditemukan.");
-  }
-} catch (err) {
-  await bot.sendMessage(chatId, `Gagal mengambil foto: ${err.message}`);
-}
+    let latestPhoto;
+    try {
+      latestPhoto = await triggerCameraAndWait(servoCommand);
+      if (latestPhoto && latestPhoto.fileName) {
+        const publicUrl = `https://storage.googleapis.com/pakan-ikan123/${latestPhoto.fileName}`;
+        await bot.sendPhoto(chatId, publicUrl, { caption: `Foto posisi: ${label}` });
+        console.log(`[DEBUG] Foto berhasil dikirim ke Telegram: ${publicUrl}`);
+      } else {
+        await bot.sendMessage(chatId, "Foto gagal diambil atau tidak ditemukan.");
+        console.log('[DEBUG] Tidak ada foto terbaru di GCS, skip pengiriman ke Telegram.');
+      }
+    } catch (err) {
+      await bot.sendMessage(chatId, `Gagal mengambil foto: ${err.message}`);
+      console.error(`[DEBUG] Error triggerCameraAndWait: ${err.message}`);
+    }
   } else if (text.startsWith("/beripakan")) {
     // Format: /beripakan kolam1 5
     const [, kolam, durasiStr] = text.split(" ");
