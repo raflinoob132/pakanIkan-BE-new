@@ -1,14 +1,13 @@
 // Struktur proyek baru untuk sistem IoT Pakan Ikan
 
 // index.js (entry point utama)
-const { uploadFishFoodImageToGCS } = require("./logic/uploadFishFood");
+const { uploadFishFoodImageToGCS,sendUserRequestPhoto } = require("./logic/uploadFishFood");
 const { sendSecurityPhotoToTelegram } = require("./logic/uploadSecurity");
 const express = require("express");
 const { initTelegramBot, bot, chatId } = require("./telegram/botHandler");
 const { startScheduler } = require("./scheduler/scheduler");
 const { resetCurrentTimeAll } = require("./logic/resetCurrentTime");
 const {startEsp32StatusMonitor} = require("./logic/monitorESP");
-const { sendUserRequestPhoto } = require("./logic/uploadUserCommandPhoto");
 //const { checkSecurity } = require("./logic/securityCheck");
 const app = express();
 

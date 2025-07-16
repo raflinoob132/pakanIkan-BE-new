@@ -64,5 +64,32 @@ async function getLatestPhotoFromGCS() {
   const [buffer] = await latestFile.download();
   return { buffer, fileName: latestFile.name };
 }
+async function sendUserRequestPhoto(buffer, bot, chatId) {
+  // Putar 180 derajat menggunakan sharp
+  const rotatedBuffer = await sharp(buffer)
+    .rotate(180)
+    .jpeg({ quality: 80 })
+    .toBuffer();
 
-module.exports = { uploadFishFoodImageToGCS, getLatestPhotoFromGCS };
+  // Kirim ke Telegram
+  await bot.sendPhoto(chatId, rotatedBuffer, { caption: 'Foto request user' });
+
+  // Upload ke GCS
+  const fileName = `photo_${Date.now()}.jpg`;
+  const file = bucket.file(fileName);
+  await file.save(rotatedBuffer, {
+    metadata: {
+      contentType: 'image/jpeg',
+    },
+  });
+
+  // Set penanda agar getLatestPhotoFromGCS bisa mendeteksi foto baru
+  isNewPhotoUploaded = true;
+
+  // Buat URL publik
+  const publicUrl = `https://storage.googleapis.com/${bucketName}/${fileName}`;
+  console.log('user request photo uploaded to GCS:', publicUrl);
+
+  return publicUrl;
+}
+module.exports = { sendUserRequestPhoto, uploadFishFoodImageToGCS, getLatestPhotoFromGCS };
