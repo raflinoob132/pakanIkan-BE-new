@@ -21,7 +21,7 @@ async function sendUserRequestPhoto(buffer, bot, chatId) {
   await bot.sendPhoto(chatId, rotatedBuffer, { caption: 'Foto request user' });
 
   // Upload ke GCS
-  const fileName = `security_${Date.now()}.jpg`;
+  const fileName = `photo_${Date.now()}.jpg`;
   const file = bucket.file(fileName);
   await file.save(rotatedBuffer, {
     metadata: {
@@ -31,7 +31,7 @@ async function sendUserRequestPhoto(buffer, bot, chatId) {
 
   // Buat URL publik
   const publicUrl = `https://storage.googleapis.com/${bucketName}/${fileName}`;
-  console.log('Security photo uploaded to GCS:', publicUrl);
+  console.log('user request photo uploaded to GCS:', publicUrl);
 
   return publicUrl;
 }
