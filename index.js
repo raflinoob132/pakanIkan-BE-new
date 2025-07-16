@@ -8,6 +8,7 @@ const { initTelegramBot, bot, chatId } = require("./telegram/botHandler");
 const { startScheduler } = require("./scheduler/scheduler");
 const { resetCurrentTimeAll } = require("./logic/resetCurrentTime");
 const {startEsp32StatusMonitor} = require("./logic/monitorESP");
+const { sendUserRequestPhoto } = require("./logic/uploadUserCommandPhoto");
 //const { checkSecurity } = require("./logic/securityCheck");
 const app = express();
 
@@ -42,6 +43,14 @@ async function resetJadwalSetiapHari() {
 }
 app.post("/uploadFood", express.raw({ type: "image/jpeg", limit: "5mb" }), uploadFishFoodImageToGCS);
 
+app.post('/sendUserPhoto', express.raw({ type: 'image/jpeg', limit: '5mb' }), async (req, res) => {
+  try {
+    const publicUrl = await sendUserRequestPhoto(req.body, bot, chatId);
+    res.status(200).json({ success: true, message: 'Foto berhasil dikirim ke Telegram.', url: publicUrl });
+  } catch (err) {
+    res.status(500).send('Gagal kirim ke Telegram');
+  }
+});
 
 //app.post("/uploadSecurity", express.raw({ type: "image/jpeg", limit: "5mb" }), sendSecurityPhotoToTelegram);
 app.post('/sendSecurity', express.raw({ type: 'image/jpeg', limit: '5mb' }), async (req, res) => {
