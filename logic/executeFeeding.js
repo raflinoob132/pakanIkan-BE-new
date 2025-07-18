@@ -165,7 +165,7 @@ async function executeFeeding(kolam, jadwalKey, sudahFeedingTambahan = false) {
       
       // Tunggu 1 menit hanya jika bukan iterasi terakhir
       if (j < 3) {
-        await delay(1 * 60 * 1000);
+        await delay(10 * 60 * 1000);
       }
     }
 
