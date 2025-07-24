@@ -14,7 +14,7 @@ async function processImage(buffer, fileName) {
   }
 
   // Gunakan path GCS untuk gambar
-  const gcsImagePath = `gs://pakan-ikan123/${fileName}`;
+  const gcsImagePath = `gs://pakan-ikan1234/${fileName}`;
   console.log(`[DEBUG] Akan menjalankan: python detect_objects.py "${gcsImagePath}" "${modelPath}"`);
 
   return new Promise((resolve, reject) => {
@@ -48,7 +48,7 @@ try {
     let makananHabis = true;
     try {
       await sendTelegramImage(
-        `https://storage.googleapis.com/pakan-ikan123/${fileName}`,
+        `https://storage.googleapis.com/pakan-ikan1234/${fileName}`,
         `Hasil deteksi objek: ${statusMessage}`
       );
     } catch (sendErr) {
@@ -72,7 +72,7 @@ try {
       // Kirim hasil ke Telegram
       try {
         await sendTelegramImage(
-          `https://storage.googleapis.com/pakan-ikan123/${fileName}`,
+          `https://storage.googleapis.com/pakan-ikan1234/${fileName}`,
           `Hasil deteksi objek: ${statusMessage}`
         );
       } catch (sendErr) {

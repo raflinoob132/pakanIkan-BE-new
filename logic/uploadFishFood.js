@@ -8,7 +8,7 @@ let isNewPhotoUploaded = false; // Penanda global
 const storage = new Storage({
   keyFilename: path.join(__dirname, '../credentials/cloud-storage-access.json'),
 });
-const bucketName = 'pakan-ikan123';
+const bucketName = 'pakan-ikan1234';
 const bucket = storage.bucket(bucketName);
 
 // Fungsi handler untuk upload gambar ke Google Cloud Storage
