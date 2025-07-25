@@ -559,17 +559,8 @@ class CameraFeedingQueue {
           const latestPhoto = await getLatestPhotoFromGCS('pakan-ikan123');
           
           if (latestPhoto) {
-            // Validasi foto (harus relatif baru - dalam 2 menit terakhir)
-            const photoTime = new Date(latestPhoto.timeCreated);
-            const timeDiff = Date.now() - photoTime.getTime();
-            
-            // Jika foto lebih baru dari 2 menit yang lalu, anggap valid
-            if (timeDiff < 120000) { // 2 menit = 120000ms
-              console.log(`Photo validated for command ${commandId}: ${latestPhoto.name} (taken ${Math.round(timeDiff/1000)}s ago)`);
-              return latestPhoto;
-            } else {
-              console.log(`Photo too old for command ${commandId}: ${Math.round(timeDiff/1000)}s old`);
-            }
+            console.log(`Photo found for command ${commandId}: ${latestPhoto.name}`);
+            return latestPhoto;
           } else {
             console.log(`No photo found for command ${commandId}, attempt ${photoCheckAttempts}`);
           }
@@ -698,7 +689,6 @@ module.exports = {
   clearQueue,
   forceCompleteCurrentRequest
 };
-
 
 // ============= OPTIONAL: Express Routes untuk Monitoring =============
 /*
