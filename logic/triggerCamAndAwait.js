@@ -430,23 +430,14 @@ class CameraFeedingQueue {
         return { isBusy: true, reason: "Masih ada command yang belum selesai" };
       }
 
-      // // Cek heartbeat ESP32 (dalam 30 detik terakhir)
-      // const heartbeatSnap = await db.ref("deviceStatus/esp32_last_seen").once("value");
-      // const lastSeen = heartbeatSnap.val();
-      
-      // if (!lastSeen || (Date.now()/1000 - lastSeen) > 30) {
-      //   return { isBusy: true, reason: "ESP32 tidak responsif" };
-      // }
-
       return { isBusy: false };
     } catch (error) {
       return { isBusy: true, reason: `Error checking status: ${error.message}` };
     }
   }
 
-
-  // Eksekusi request individual dengan timeout dan retry
-  async executeRequest(request, maxRetries = 2) {
+  // Eksekusi request individual dengan timeout dan retry - WITH COMMAND RETRY
+  async executeRequest(request, maxRetries = 3) { // Tambah retry karena ada command retry
     let lastError;
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -454,16 +445,16 @@ class CameraFeedingQueue {
         console.log(`Request ${request.id} - Percobaan ${attempt}/${maxRetries}`);
 
         // 1. Kirim perintah dengan timestamp unik
-        const commandId = request.id;
+        const commandId = request.id + `-attempt${attempt}`;
         await db.ref("checkCameraMoveCommand").set({
           commandId: commandId,
           moveServo: request.servoCommand,
           status: 1,
           timestamp: Date.now(),
-          purpose: request.purpose // Tambahkan purpose ke database
+          purpose: request.purpose
         });
 
-        console.log(`Command sent for ${request.id}: ${request.servoCommand}, purpose: ${request.purpose}`);
+        console.log(`Command sent for ${request.id}: ${request.servoCommand}, purpose: ${request.purpose} (attempt ${attempt})`);
 
         // 2. Tunggu sampai selesai dengan monitoring
         const result = await this.waitForCompletion(commandId);
@@ -483,6 +474,25 @@ class CameraFeedingQueue {
         lastError = error;
         console.error(`Request ${request.id} attempt ${attempt} failed:`, error.message);
 
+        // Clean up command on error
+        try {
+          await db.ref("checkCameraMoveCommand").set({
+            commandId: null,
+            moveServo: null,
+            status: 0,
+            timestamp: null,
+            purpose: null
+          });
+        } catch (cleanupError) {
+          console.error(`Cleanup error for ${request.id}:`, cleanupError.message);
+        }
+
+        // Jika error adalah RETRY_COMMAND, langsung retry tanpa delay
+        if (error.message.includes('RETRY_COMMAND:')) {
+          console.log(`🔄 Retrying command immediately for ${request.id} (photo not found after 60s)`);
+          continue;
+        }
+
         if (attempt < maxRetries) {
           console.log(`Retry dalam 3 detik...`);
           await this.delay(3000);
@@ -493,74 +503,97 @@ class CameraFeedingQueue {
     throw lastError;
   }
 
-
-  // Tunggu completion dengan monitoring detail
+  // Tunggu completion dengan monitoring detail - WITH AUTO RETRY
   async waitForCompletion(commandId, maxWait = 35000) {
     const startTime = Date.now();
     let waited = 0;
     const interval = 1000;
     let lastStatus = null;
+    let commandCompleted = false;
+    let photoCheckAttempts = 0;
+    const maxPhotoCheckAttempts = 60; // Max 60 detik untuk cari foto setelah command selesai
+    const photoCheckStartTime = null;
+    let photoCheckStart = null;
     
     console.log(`Menunggu completion untuk command ${commandId}...`);
 
     while (waited < maxWait) {
       try {
-        // 1. Cek status command
-        const snap = await db.ref("checkCameraMoveCommand").once("value");
-        const commandData = snap.val();
-        
-        if (!commandData) {
-          throw new Error("Command data hilang dari database");
-        }
-
-        // Pastikan ini command kita
-        if (commandData.commandId !== commandId) {
-          throw new Error(`Command ID mismatch. Expected: ${commandId}, Got: ${commandData.commandId}`);
-        }
-
-        const currentStatus = commandData.status;
-        
-        // Log perubahan status
-        if (currentStatus !== lastStatus) {
-          console.log(`Command ${commandId} status: ${lastStatus} -> ${currentStatus}`);
-          lastStatus = currentStatus;
-        }
-
-        // 2. Jika status = 0, berarti ESP32 sudah selesai
-        if (currentStatus === 0) {
-          console.log(`Command ${commandId} completed. Checking for photo...`);
+        // 1. Jika command belum completed, cek status command
+        if (!commandCompleted) {
+          const snap = await db.ref("checkCameraMoveCommand").once("value");
+          const commandData = snap.val();
           
-          // 3. Cek foto terbaru
-          const latestPhoto = await getLatestPhotoFromGCS('pakan-ikan123');
-          
-          if (latestPhoto) {
-            // Validasi foto (harus baru)
-            const photoTime = new Date(latestPhoto.timeCreated);
-            const commandTime = new Date(startTime);
-            
+          if (!commandData) {
+            throw new Error("Command data hilang dari database");
+          }
 
-            console.log(`Photo validated for command ${commandId}: ${latestPhoto.name}`);
-            return latestPhoto;
-        
-            // else {
-            //   console.log(`Photo too old for command ${commandId}. Waiting for newer photo...`);
-            // }
+          // Pastikan ini command kita
+          if (commandData.commandId !== commandId) {
+            throw new Error(`Command ID mismatch. Expected: ${commandId}, Got: ${commandData.commandId}`);
+          }
+
+          const currentStatus = commandData.status;
+          
+          // Log perubahan status
+          if (currentStatus !== lastStatus) {
+            console.log(`Command ${commandId} status: ${lastStatus} -> ${currentStatus}`);
+            lastStatus = currentStatus;
+          }
+
+          // 2. Jika status = 0, berarti ESP32 sudah selesai
+          if (currentStatus === 0) {
+            console.log(`Command ${commandId} completed. Starting photo check...`);
+            commandCompleted = true;
+            photoCheckAttempts = 0;
+            photoCheckStart = Date.now();
           }
         }
 
-        // 4. Cek status ESP32
-        const deviceSnap = await db.ref("deviceStatus").once("value");
-        const deviceStatus = deviceSnap.val();
-        
-        if (deviceStatus && deviceStatus.camera_busy === "false") {
-          // ESP32 bilang tidak busy tapi status masih 1? Ada masalah
-          if (currentStatus === 1 && waited > 10000) {
-            console.log(`Status inconsistency detected for ${commandId}. ESP32 not busy but command still pending.`);
+        // 3. Jika command sudah completed, cek foto dengan retry limit
+        if (commandCompleted) {
+          photoCheckAttempts++;
+          const photoCheckDuration = Math.round((Date.now() - photoCheckStart) / 1000);
+          console.log(`Photo check attempt ${photoCheckAttempts}/${maxPhotoCheckAttempts} for command ${commandId} (${photoCheckDuration}s since completion)`);
+          
+          const latestPhoto = await getLatestPhotoFromGCS('pakan-ikan123');
+          
+          if (latestPhoto) {
+            // Validasi foto (harus relatif baru - dalam 2 menit terakhir)
+            const photoTime = new Date(latestPhoto.timeCreated);
+            const timeDiff = Date.now() - photoTime.getTime();
+            
+            // Jika foto lebih baru dari 2 menit yang lalu, anggap valid
+            if (timeDiff < 120000) { // 2 menit = 120000ms
+              console.log(`Photo validated for command ${commandId}: ${latestPhoto.name} (taken ${Math.round(timeDiff/1000)}s ago)`);
+              return latestPhoto;
+            } else {
+              console.log(`Photo too old for command ${commandId}: ${Math.round(timeDiff/1000)}s old`);
+            }
+          } else {
+            console.log(`No photo found for command ${commandId}, attempt ${photoCheckAttempts}`);
+          }
+
+          // RETRY MECHANISM: Jika sudah 60 detik tidak ada foto, kirim ulang command
+          if (photoCheckDuration >= 60) {
+            console.log(`⚠️  Photo not found after 60s for command ${commandId}. Retrying command...`);
+            throw new Error(`RETRY_COMMAND: No photo found after 60 seconds for command ${commandId}`);
           }
         }
 
       } catch (error) {
         console.error(`Error monitoring command ${commandId}:`, error.message);
+        
+        // Jika error adalah request retry command, throw untuk ditangani di executeRequest
+        if (error.message.includes('RETRY_COMMAND:')) {
+          throw error;
+        }
+        
+        // Jika error fatal lainnya, langsung throw
+        if (error.message.includes('Command data hilang') || 
+            error.message.includes('Command ID mismatch')) {
+          throw error;
+        }
       }
 
       await this.delay(interval);
@@ -596,8 +629,43 @@ class CameraFeedingQueue {
       req.reject(new Error("Queue cleared by admin"));
     });
     this.queue = [];
+    
+    // Reset processing state
+    this.processing = false;
+    this.currentRequestId = null;
+    
     console.log(`Queue cleared. ${rejectedCount} requests rejected.`);
     return rejectedCount;
+  }
+
+  // Force complete current request (emergency)
+  async forceCompleteCurrentRequest() {
+    if (this.currentRequestId) {
+      console.log(`Force completing request: ${this.currentRequestId}`);
+      
+      // Clean up database
+      try {
+        await db.ref("checkCameraMoveCommand").set({
+          commandId: null,
+          moveServo: null,
+          status: 0,
+          timestamp: null,
+          purpose: null
+        });
+      } catch (error) {
+        console.error("Error cleaning up database:", error.message);
+      }
+      
+      // Reset state
+      this.processing = false;
+      this.currentRequestId = null;
+      
+      // Continue processing queue
+      setTimeout(() => this.processQueue(), 1000);
+      
+      return true;
+    }
+    return false;
   }
 }
 
@@ -619,11 +687,16 @@ function clearQueue() {
   return cameraQueue.clearQueue();
 }
 
+function forceCompleteCurrentRequest() {
+  return cameraQueue.forceCompleteCurrentRequest();
+}
+
 // ============= EXPORTS =============
 module.exports = { 
   triggerCameraAndWait,
   getQueueStatus,
-  clearQueue
+  clearQueue,
+  forceCompleteCurrentRequest
 };
 
 
