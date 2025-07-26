@@ -584,18 +584,34 @@ class CameraFeedingQueue {
           const latestPhoto = await getLatestPhotoFromGCS('pakan-ikan123');
           
           if (latestPhoto) {
+            // Debug: Log photo object structure
+            console.log(`📸 Photo object:`, {
+              name: latestPhoto.name,
+              fileName: latestPhoto.fileName,
+              id: latestPhoto.id,
+              timeCreated: latestPhoto.timeCreated,
+              updated: latestPhoto.updated,
+              keys: Object.keys(latestPhoto)
+            });
+            
+            // Get photo identifier - handle different property names
+            const photoId = latestPhoto.name || latestPhoto.fileName || latestPhoto.id || 'unknown';
+            const lastPhotoId = lastPhotoCheck ? (lastPhotoCheck.name || lastPhotoCheck.fileName || lastPhotoCheck.id) : null;
+            
             // Strategy 1: Check if this is a new photo since we started
-            if (!lastPhotoCheck || latestPhoto.name !== lastPhotoCheck.name) {
-              console.log(`📸 New photo detected: ${latestPhoto.name}`);
+            if (!lastPhotoCheck || photoId !== lastPhotoId) {
+              console.log(`📸 New photo detected: ${photoId}`);
               
               // Strategy 2: Validate photo timestamp with timezone tolerance
               const isValidPhoto = this.validatePhotoTimestamp(latestPhoto, commandStartTime, now);
               if (isValidPhoto.valid) {
-                console.log(`📸 Valid photo found for ${commandId}: ${latestPhoto.name} (${isValidPhoto.reason})`);
+                console.log(`📸 Valid photo found for ${commandId}: ${photoId} (${isValidPhoto.reason})`);
                 return latestPhoto;
               } else {
                 console.log(`📸 Photo rejected: ${isValidPhoto.reason}`);
               }
+            } else {
+              console.log(`📸 Same photo as before: ${photoId}, waiting for new one...`);
             }
             
             lastPhotoCheck = latestPhoto;
@@ -614,18 +630,44 @@ class CameraFeedingQueue {
   // Smart photo validation with timezone handling
   validatePhotoTimestamp(photo, commandStartTime, currentTime) {
     try {
-      const photoTime = new Date(photo.timeCreated || photo.updated);
-      const photoTimestamp = photoTime.getTime();
+      // Try multiple timestamp properties and formats
+      let photoTime = null;
+      let timestampSource = '';
       
-      // Handle invalid timestamps
-      if (isNaN(photoTimestamp)) {
-        return { valid: false, reason: "Invalid photo timestamp" };
+      // Try different timestamp properties
+      if (photo.timeCreated) {
+        photoTime = new Date(photo.timeCreated);
+        timestampSource = 'timeCreated';
+      } else if (photo.updated) {
+        photoTime = new Date(photo.updated);
+        timestampSource = 'updated';
+      } else if (photo.created) {
+        photoTime = new Date(photo.created);
+        timestampSource = 'created';
+      } else if (photo.lastModified) {
+        photoTime = new Date(photo.lastModified);
+        timestampSource = 'lastModified';
+      } else {
+        // Fallback: try to extract timestamp from filename
+        const photoId = photo.name || photo.fileName || photo.id || '';
+        const timestampMatch = photoId.match(/photo_(\d+)\.jpg/);
+        if (timestampMatch) {
+          photoTime = new Date(parseInt(timestampMatch[1]));
+          timestampSource = 'filename';
+        }
       }
       
+      // Handle invalid timestamps
+      if (!photoTime || isNaN(photoTime.getTime())) {
+        console.log(`📸 Available photo properties:`, Object.keys(photo));
+        return { valid: false, reason: `Invalid photo timestamp from ${timestampSource}` };
+      }
+      
+      const photoTimestamp = photoTime.getTime();
       const timeDiffFromCommand = photoTimestamp - commandStartTime;
       const timeDiffFromNow = currentTime - photoTimestamp;
       
-      console.log(`📸 Photo validation:
+      console.log(`📸 Photo validation (${timestampSource}):
         - Photo time: ${photoTime.toISOString()}
         - Command start: ${new Date(commandStartTime).toISOString()}  
         - Current time: ${new Date(currentTime).toISOString()}
@@ -634,23 +676,23 @@ class CameraFeedingQueue {
       
       // Strategy 1: Photo taken after command started (ideal case)
       if (timeDiffFromCommand >= -5000 && timeDiffFromCommand <= 120000) { // -5s to +2min from command
-        return { valid: true, reason: `photo taken ${Math.round(timeDiffFromCommand/1000)}s after command` };
+        return { valid: true, reason: `photo taken ${Math.round(timeDiffFromCommand/1000)}s after command (${timestampSource})` };
       }
       
       // Strategy 2: Photo is very recent (handle timezone issues)
       if (Math.abs(timeDiffFromNow) <= 300000) { // Within 5 minutes of current time (either direction)
-        return { valid: true, reason: `recent photo (${Math.round(timeDiffFromNow/1000)}s from now)` };
+        return { valid: true, reason: `recent photo ${Math.round(timeDiffFromNow/1000)}s from now (${timestampSource})` };
       }
       
       // Strategy 3: For timezone issues, check if photo could be from this session
       // If server thinks photo is from future but within reasonable range, accept it
       if (timeDiffFromNow < 0 && Math.abs(timeDiffFromNow) <= 8 * 60 * 60 * 1000) { // Up to 8 hours in "future"
-        return { valid: true, reason: `timezone-adjusted photo (${Math.round(timeDiffFromNow/3600000)}h ahead)` };
+        return { valid: true, reason: `timezone-adjusted photo ${Math.round(timeDiffFromNow/3600000)}h ahead (${timestampSource})` };
       }
       
       return { 
         valid: false, 
-        reason: `photo too old/distant (${Math.round(timeDiffFromCommand/1000)}s from command, ${Math.round(timeDiffFromNow/1000)}s from now)` 
+        reason: `photo too old/distant: ${Math.round(timeDiffFromCommand/1000)}s from command, ${Math.round(timeDiffFromNow/1000)}s from now (${timestampSource})` 
       };
       
     } catch (error) {
@@ -666,11 +708,18 @@ class CameraFeedingQueue {
       const photo = await getLatestPhotoFromGCS('pakan-ikan123');
       
       if (photo) {
+        const photoId = photo.name || photo.fileName || photo.id || 'unknown';
+        console.log(`🔍 Found photo in fallback: ${photoId}`);
+        
         const validation = this.validatePhotoTimestamp(photo, commandStartTime, Date.now());
         if (validation.valid) {
-          console.log(`📸 Fallback photo found: ${photo.name} (${validation.reason})`);
+          console.log(`📸 Fallback photo accepted: ${photoId} (${validation.reason})`);
           return photo;
+        } else {
+          console.log(`📸 Fallback photo rejected: ${validation.reason}`);
         }
+      } else {
+        console.log(`🔍 No photo found in fallback search`);
       }
       
       return null;
