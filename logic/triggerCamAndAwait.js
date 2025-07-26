@@ -535,6 +535,7 @@ class CameraFeedingQueue {
     let commandStartTime = Date.now();
     let commandCompleted = false;
     let photoCheckStartTime = null;
+    let lastPhotoCheck = null;
     
     console.log(`⏳ Waiting for command ${commandId} completion...`);
 
@@ -569,6 +570,12 @@ class CameraFeedingQueue {
           // Check photo timeout
           const photoWaitTime = now - photoCheckStartTime;
           if (photoWaitTime > PHOTO_TIMEOUT) {
+            // Before failing, try one more time with any recent photo
+            console.log(`⚠️ Photo timeout reached, trying fallback strategy...`);
+            const fallbackPhoto = await this.findRecentPhoto(commandStartTime);
+            if (fallbackPhoto) {
+              return fallbackPhoto;
+            }
             throw new Error(`Photo not found for ${commandId} after ${PHOTO_TIMEOUT}ms`);
           }
 
@@ -577,16 +584,21 @@ class CameraFeedingQueue {
           const latestPhoto = await getLatestPhotoFromGCS('pakan-ikan123');
           
           if (latestPhoto) {
-            // Verify photo is recent (within last 2 minutes)
-            const photoTime = new Date(latestPhoto.timeCreated || latestPhoto.updated);
-            const timeDiff = now - photoTime.getTime();
-            
-            if (timeDiff < 2 * 60 * 1000) { // Photo less than 2 minutes old
-              console.log(`📸 Fresh photo found for ${commandId}: ${latestPhoto.name}`);
-              return latestPhoto;
-            } else {
-              console.log(`📸 Photo found but too old (${Math.round(timeDiff/1000)}s), continuing search...`);
+            // Strategy 1: Check if this is a new photo since we started
+            if (!lastPhotoCheck || latestPhoto.name !== lastPhotoCheck.name) {
+              console.log(`📸 New photo detected: ${latestPhoto.name}`);
+              
+              // Strategy 2: Validate photo timestamp with timezone tolerance
+              const isValidPhoto = this.validatePhotoTimestamp(latestPhoto, commandStartTime, now);
+              if (isValidPhoto.valid) {
+                console.log(`📸 Valid photo found for ${commandId}: ${latestPhoto.name} (${isValidPhoto.reason})`);
+                return latestPhoto;
+              } else {
+                console.log(`📸 Photo rejected: ${isValidPhoto.reason}`);
+              }
             }
+            
+            lastPhotoCheck = latestPhoto;
           }
         }
 
@@ -596,6 +608,75 @@ class CameraFeedingQueue {
       }
 
       await this.delay(CHECK_INTERVAL);
+    }
+  }
+
+  // Smart photo validation with timezone handling
+  validatePhotoTimestamp(photo, commandStartTime, currentTime) {
+    try {
+      const photoTime = new Date(photo.timeCreated || photo.updated);
+      const photoTimestamp = photoTime.getTime();
+      
+      // Handle invalid timestamps
+      if (isNaN(photoTimestamp)) {
+        return { valid: false, reason: "Invalid photo timestamp" };
+      }
+      
+      const timeDiffFromCommand = photoTimestamp - commandStartTime;
+      const timeDiffFromNow = currentTime - photoTimestamp;
+      
+      console.log(`📸 Photo validation:
+        - Photo time: ${photoTime.toISOString()}
+        - Command start: ${new Date(commandStartTime).toISOString()}  
+        - Current time: ${new Date(currentTime).toISOString()}
+        - Diff from command: ${Math.round(timeDiffFromCommand/1000)}s
+        - Diff from now: ${Math.round(timeDiffFromNow/1000)}s`);
+      
+      // Strategy 1: Photo taken after command started (ideal case)
+      if (timeDiffFromCommand >= -5000 && timeDiffFromCommand <= 120000) { // -5s to +2min from command
+        return { valid: true, reason: `photo taken ${Math.round(timeDiffFromCommand/1000)}s after command` };
+      }
+      
+      // Strategy 2: Photo is very recent (handle timezone issues)
+      if (Math.abs(timeDiffFromNow) <= 300000) { // Within 5 minutes of current time (either direction)
+        return { valid: true, reason: `recent photo (${Math.round(timeDiffFromNow/1000)}s from now)` };
+      }
+      
+      // Strategy 3: For timezone issues, check if photo could be from this session
+      // If server thinks photo is from future but within reasonable range, accept it
+      if (timeDiffFromNow < 0 && Math.abs(timeDiffFromNow) <= 8 * 60 * 60 * 1000) { // Up to 8 hours in "future"
+        return { valid: true, reason: `timezone-adjusted photo (${Math.round(timeDiffFromNow/3600000)}h ahead)` };
+      }
+      
+      return { 
+        valid: false, 
+        reason: `photo too old/distant (${Math.round(timeDiffFromCommand/1000)}s from command, ${Math.round(timeDiffFromNow/1000)}s from now)` 
+      };
+      
+    } catch (error) {
+      console.error("Error validating photo timestamp:", error);
+      return { valid: false, reason: `validation error: ${error.message}` };
+    }
+  }
+
+  // Fallback: Find any photo that might be from this command session
+  async findRecentPhoto(commandStartTime) {
+    try {
+      console.log(`🔍 Searching for any recent photo since command started...`);
+      const photo = await getLatestPhotoFromGCS('pakan-ikan123');
+      
+      if (photo) {
+        const validation = this.validatePhotoTimestamp(photo, commandStartTime, Date.now());
+        if (validation.valid) {
+          console.log(`📸 Fallback photo found: ${photo.name} (${validation.reason})`);
+          return photo;
+        }
+      }
+      
+      return null;
+    } catch (error) {
+      console.error("Error in fallback photo search:", error);
+      return null;
     }
   }
 
