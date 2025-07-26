@@ -346,6 +346,7 @@ class CameraFeedingQueue {
     this.queue = [];
     this.processing = false;
     this.currentRequestId = null;
+    this.failedRequests = new Map(); // Track failed requests to prevent infinite retry
   }
 
   // Tambah request ke antrian
@@ -359,7 +360,10 @@ class CameraFeedingQueue {
         purpose,
         resolve,
         reject,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        attempts: 0,
+        maxAttempts: 3,
+        createdAt: Date.now()
       };
 
       this.queue.push(request);
@@ -370,7 +374,7 @@ class CameraFeedingQueue {
     });
   }
 
-  // Proses antrian satu per satu
+  // Proses antrian satu per satu dengan timeout protection
   async processQueue() {
     if (this.processing || this.queue.length === 0) {
       return;
@@ -382,33 +386,81 @@ class CameraFeedingQueue {
       const request = this.queue.shift();
       this.currentRequestId = request.id;
       
-      console.log(`Memproses request ${request.id} - Servo: ${request.servoCommand}`);
+      console.log(`Memproses request ${request.id} - Servo: ${request.servoCommand} (attempt ${request.attempts + 1}/${request.maxAttempts})`);
       
       try {
+        // Check if request is too old (older than 10 minutes)
+        const requestAge = Date.now() - request.createdAt;
+        if (requestAge > 10 * 60 * 1000) {
+          throw new Error(`Request expired: ${Math.round(requestAge / 60000)} minutes old`);
+        }
+
+        // Check if this request has failed too many times before
+        const failureKey = `${request.servoCommand}-${request.purpose}`;
+        const recentFailures = this.getRecentFailures(failureKey);
+        if (recentFailures >= 5) {
+          throw new Error(`Too many recent failures for command ${request.servoCommand}. Skipping.`);
+        }
+
         // Cek apakah ESP32 sedang sibuk
         const busyCheck = await this.checkESP32Status();
         if (busyCheck.isBusy) {
           throw new Error(`ESP32 sedang sibuk: ${busyCheck.reason}`);
         }
 
-        // Eksekusi request
-        const result = await this.executeRequest(request);
+        // Eksekusi request dengan timeout
+        const result = await this.executeRequestWithTimeout(request);
         request.resolve(result);
         
-        console.log(`Request ${request.id} berhasil diproses`);
+        console.log(`✅ Request ${request.id} berhasil diproses`);
         
       } catch (error) {
-        console.error(`Request ${request.id} gagal:`, error.message);
+        console.error(`❌ Request ${request.id} gagal:`, error.message);
+        
+        // Increment attempt counter
+        request.attempts++;
+        
+        // Check if we should retry
+        if (request.attempts < request.maxAttempts && 
+            !error.message.includes('expired') && 
+            !error.message.includes('Too many recent failures')) {
+          
+          console.log(`🔄 Retrying request ${request.id} (${request.attempts}/${request.maxAttempts})`);
+          
+          // Add back to front of queue for retry
+          this.queue.unshift(request);
+          
+          // Wait before retry
+          await this.delay(3000);
+          continue;
+        }
+        
+        // Request failed permanently
+        this.recordFailure(`${request.servoCommand}-${request.purpose}`);
         request.reject(error);
       }
+      
+      // Reset current request
+      this.currentRequestId = null;
       
       // Delay antar request untuk mencegah overload
       await this.delay(2000);
     }
     
     this.processing = false;
-    this.currentRequestId = null;
-    console.log("Semua request dalam antrian selesai diproses");
+    console.log("✅ Semua request dalam antrian selesai diproses");
+  }
+
+  // Execute request with overall timeout
+  async executeRequestWithTimeout(request) {
+    const TOTAL_TIMEOUT = 120000; // 2 minutes total timeout per request
+    
+    return Promise.race([
+      this.executeRequest(request),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error(`Request ${request.id} timeout after ${TOTAL_TIMEOUT}ms`)), TOTAL_TIMEOUT)
+      )
+    ]);
   }
 
   // Cek status ESP32 sebelum kirim command
@@ -436,162 +488,158 @@ class CameraFeedingQueue {
     }
   }
 
-  // Eksekusi request individual dengan timeout dan retry - WITH COMMAND RETRY
-  async executeRequest(request, maxRetries = 3) { // Tambah retry karena ada command retry
-    let lastError;
+  // Eksekusi request individual - SIMPLIFIED WITH BETTER ERROR HANDLING
+  async executeRequest(request) {
+    const commandId = request.id + `-attempt${request.attempts + 1}`;
+    
+    try {
+      console.log(`📤 Sending command ${commandId}: ${request.servoCommand}`);
 
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      // 1. Kirim perintah dengan timestamp unik
+      await db.ref("checkCameraMoveCommand").set({
+        commandId: commandId,
+        moveServo: request.servoCommand,
+        status: 1,
+        timestamp: Date.now(),
+        purpose: request.purpose
+      });
+
+      // 2. Tunggu sampai selesai dengan monitoring yang lebih strict
+      const result = await this.waitForCompletionWithStrictTimeout(commandId);
+
+      // 3. Bersihkan command
+      await this.cleanupCommand();
+
+      return result;
+
+    } catch (error) {
+      console.error(`❌ Execute request failed for ${commandId}:`, error.message);
+      
+      // Clean up command on error
       try {
-        console.log(`Request ${request.id} - Percobaan ${attempt}/${maxRetries}`);
-
-        // 1. Kirim perintah dengan timestamp unik
-        const commandId = request.id + `-attempt${attempt}`;
-        await db.ref("checkCameraMoveCommand").set({
-          commandId: commandId,
-          moveServo: request.servoCommand,
-          status: 1,
-          timestamp: Date.now(),
-          purpose: request.purpose
-        });
-
-        console.log(`Command sent for ${request.id}: ${request.servoCommand}, purpose: ${request.purpose} (attempt ${attempt})`);
-
-        // 2. Tunggu sampai selesai dengan monitoring
-        const result = await this.waitForCompletion(commandId);
-
-        // 3. Bersihkan command
-        await db.ref("checkCameraMoveCommand").set({
-          commandId: null,
-          moveServo: null,
-          status: 0,
-          timestamp: null,
-          purpose: null
-        });
-
-        return result;
-
-      } catch (error) {
-        lastError = error;
-        console.error(`Request ${request.id} attempt ${attempt} failed:`, error.message);
-
-        // Clean up command on error
-        try {
-          await db.ref("checkCameraMoveCommand").set({
-            commandId: null,
-            moveServo: null,
-            status: 0,
-            timestamp: null,
-            purpose: null
-          });
-        } catch (cleanupError) {
-          console.error(`Cleanup error for ${request.id}:`, cleanupError.message);
-        }
-
-        // Jika error adalah RETRY_COMMAND, langsung retry tanpa delay
-        if (error.message.includes('RETRY_COMMAND:')) {
-          console.log(`🔄 Retrying command immediately for ${request.id} (photo not found after 60s)`);
-          continue;
-        }
-
-        if (attempt < maxRetries) {
-          console.log(`Retry dalam 3 detik...`);
-          await this.delay(3000);
-        }
+        await this.cleanupCommand();
+      } catch (cleanupError) {
+        console.error(`🧹 Cleanup error for ${commandId}:`, cleanupError.message);
       }
-    }
 
-    throw lastError;
+      throw error;
+    }
   }
 
-  // Tunggu completion dengan monitoring detail - WITH AUTO RETRY
-  async waitForCompletion(commandId, maxWait = 35000) {
-    const startTime = Date.now();
-    let waited = 0;
-    const interval = 1000;
-    let lastStatus = null;
-    let commandCompleted = false;
-    let photoCheckAttempts = 0;
-    const maxPhotoCheckAttempts = 60; // Max 60 detik untuk cari foto setelah command selesai
-    const photoCheckStartTime = null;
-    let photoCheckStart = null;
+  // Wait for completion with strict timeout and better photo checking
+  async waitForCompletionWithStrictTimeout(commandId) {
+    const COMMAND_TIMEOUT = 30000; // 30 seconds for ESP32 to complete
+    const PHOTO_TIMEOUT = 60000;   // 60 seconds to find photo
+    const CHECK_INTERVAL = 1000;   // Check every 1 second
     
-    console.log(`Menunggu completion untuk command ${commandId}...`);
+    let commandStartTime = Date.now();
+    let commandCompleted = false;
+    let photoCheckStartTime = null;
+    
+    console.log(`⏳ Waiting for command ${commandId} completion...`);
 
-    while (waited < maxWait) {
+    while (true) {
+      const now = Date.now();
+      
       try {
-        // 1. Jika command belum completed, cek status command
+        // Phase 1: Wait for ESP32 to complete command
         if (!commandCompleted) {
+          // Check command timeout
+          if (now - commandStartTime > COMMAND_TIMEOUT) {
+            throw new Error(`Command ${commandId} timeout - ESP32 tidak merespons dalam ${COMMAND_TIMEOUT}ms`);
+          }
+
           const snap = await db.ref("checkCameraMoveCommand").once("value");
           const commandData = snap.val();
           
-          if (!commandData) {
-            throw new Error("Command data hilang dari database");
+          if (!commandData || commandData.commandId !== commandId) {
+            throw new Error(`Command ${commandId} data corrupted or not found`);
           }
 
-          // Pastikan ini command kita
-          if (commandData.commandId !== commandId) {
-            throw new Error(`Command ID mismatch. Expected: ${commandId}, Got: ${commandData.commandId}`);
-          }
-
-          const currentStatus = commandData.status;
-          
-          // Log perubahan status
-          if (currentStatus !== lastStatus) {
-            console.log(`Command ${commandId} status: ${lastStatus} -> ${currentStatus}`);
-            lastStatus = currentStatus;
-          }
-
-          // 2. Jika status = 0, berarti ESP32 sudah selesai
-          if (currentStatus === 0) {
-            console.log(`Command ${commandId} completed. Starting photo check...`);
+          // Check if command completed
+          if (commandData.status === 0) {
+            console.log(`✅ Command ${commandId} completed by ESP32`);
             commandCompleted = true;
-            photoCheckAttempts = 0;
-            photoCheckStart = Date.now();
+            photoCheckStartTime = now;
           }
         }
 
-        // 3. Jika command sudah completed, cek foto dengan retry limit
+        // Phase 2: Wait for photo after command completion
         if (commandCompleted) {
-          photoCheckAttempts++;
-          const photoCheckDuration = Math.round((Date.now() - photoCheckStart) / 1000);
-          console.log(`Photo check attempt ${photoCheckAttempts}/${maxPhotoCheckAttempts} for command ${commandId} (${photoCheckDuration}s since completion)`);
+          // Check photo timeout
+          const photoWaitTime = now - photoCheckStartTime;
+          if (photoWaitTime > PHOTO_TIMEOUT) {
+            throw new Error(`Photo not found for ${commandId} after ${PHOTO_TIMEOUT}ms`);
+          }
+
+          console.log(`📸 Checking for photo (${Math.round(photoWaitTime/1000)}s since completion)...`);
           
           const latestPhoto = await getLatestPhotoFromGCS('pakan-ikan123');
           
           if (latestPhoto) {
-            console.log(`Photo found for command ${commandId}: ${latestPhoto.name}`);
-            return latestPhoto;
-          } else {
-            console.log(`No photo found for command ${commandId}, attempt ${photoCheckAttempts}`);
-          }
-
-          // RETRY MECHANISM: Jika sudah 60 detik tidak ada foto, kirim ulang command
-          if (photoCheckDuration >= 60) {
-            console.log(`⚠️  Photo not found after 60s for command ${commandId}. Retrying command...`);
-            throw new Error(`RETRY_COMMAND: No photo found after 60 seconds for command ${commandId}`);
+            // Verify photo is recent (within last 2 minutes)
+            const photoTime = new Date(latestPhoto.timeCreated || latestPhoto.updated);
+            const timeDiff = now - photoTime.getTime();
+            
+            if (timeDiff < 2 * 60 * 1000) { // Photo less than 2 minutes old
+              console.log(`📸 Fresh photo found for ${commandId}: ${latestPhoto.name}`);
+              return latestPhoto;
+            } else {
+              console.log(`📸 Photo found but too old (${Math.round(timeDiff/1000)}s), continuing search...`);
+            }
           }
         }
 
       } catch (error) {
-        console.error(`Error monitoring command ${commandId}:`, error.message);
-        
-        // Jika error adalah request retry command, throw untuk ditangani di executeRequest
-        if (error.message.includes('RETRY_COMMAND:')) {
-          throw error;
-        }
-        
-        // Jika error fatal lainnya, langsung throw
-        if (error.message.includes('Command data hilang') || 
-            error.message.includes('Command ID mismatch')) {
-          throw error;
-        }
+        console.error(`❌ Error monitoring ${commandId}:`, error.message);
+        throw error;
       }
 
-      await this.delay(interval);
-      waited += interval;
+      await this.delay(CHECK_INTERVAL);
     }
+  }
 
-    throw new Error(`Timeout waiting for command ${commandId} completion after ${maxWait}ms`);
+  // Clean up command in database
+  async cleanupCommand() {
+    try {
+      await db.ref("checkCameraMoveCommand").set({
+        commandId: null,
+        moveServo: null,
+        status: 0,
+        timestamp: null,
+        purpose: null
+      });
+    } catch (error) {
+      console.error("❌ Failed to cleanup command:", error.message);
+    }
+  }
+
+  // Track failures to prevent spam
+  recordFailure(key) {
+    const now = Date.now();
+    if (!this.failedRequests.has(key)) {
+      this.failedRequests.set(key, []);
+    }
+    
+    const failures = this.failedRequests.get(key);
+    failures.push(now);
+    
+    // Keep only failures from last 30 minutes
+    const thirtyMinutesAgo = now - 30 * 60 * 1000;
+    this.failedRequests.set(key, failures.filter(time => time > thirtyMinutesAgo));
+  }
+
+  // Get recent failure count
+  getRecentFailures(key) {
+    if (!this.failedRequests.has(key)) {
+      return 0;
+    }
+    
+    const now = Date.now();
+    const thirtyMinutesAgo = now - 30 * 60 * 1000;
+    const recentFailures = this.failedRequests.get(key).filter(time => time > thirtyMinutesAgo);
+    
+    return recentFailures.length;
   }
 
   // Utility delay function
@@ -599,8 +647,9 @@ class CameraFeedingQueue {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
-  // Get queue status
+  // Get queue status with more details
   getStatus() {
+    const now = Date.now();
     return {
       queueLength: this.queue.length,
       processing: this.processing,
@@ -608,16 +657,21 @@ class CameraFeedingQueue {
       queuedRequests: this.queue.map(req => ({
         id: req.id,
         servoCommand: req.servoCommand,
+        purpose: req.purpose,
+        attempts: req.attempts,
+        maxAttempts: req.maxAttempts,
+        age: Math.round((now - req.createdAt) / 1000),
         timestamp: req.timestamp
-      }))
+      })),
+      recentFailures: Object.fromEntries(this.failedRequests)
     };
   }
 
-  // Clear queue (emergency)
-  clearQueue() {
+  // Clear queue (emergency) - improved
+  clearQueue(reason = "Manual clear") {
     const rejectedCount = this.queue.length;
     this.queue.forEach(req => {
-      req.reject(new Error("Queue cleared by admin"));
+      req.reject(new Error(`Queue cleared: ${reason}`));
     });
     this.queue = [];
     
@@ -625,47 +679,76 @@ class CameraFeedingQueue {
     this.processing = false;
     this.currentRequestId = null;
     
-    console.log(`Queue cleared. ${rejectedCount} requests rejected.`);
+    console.log(`🧹 Queue cleared (${reason}). ${rejectedCount} requests rejected.`);
     return rejectedCount;
   }
 
-  // Force complete current request (emergency)
-  async forceCompleteCurrentRequest() {
+  // Force complete current request (emergency) - improved
+  async forceCompleteCurrentRequest(reason = "Force complete") {
     if (this.currentRequestId) {
-      console.log(`Force completing request: ${this.currentRequestId}`);
+      console.log(`🚨 Force completing request: ${this.currentRequestId} (${reason})`);
       
       // Clean up database
-      try {
-        await db.ref("checkCameraMoveCommand").set({
-          commandId: null,
-          moveServo: null,
-          status: 0,
-          timestamp: null,
-          purpose: null
-        });
-      } catch (error) {
-        console.error("Error cleaning up database:", error.message);
-      }
+      await this.cleanupCommand();
       
       // Reset state
       this.processing = false;
       this.currentRequestId = null;
       
-      // Continue processing queue
-      setTimeout(() => this.processQueue(), 1000);
+      // Continue processing queue after short delay
+      setTimeout(() => {
+        console.log("🔄 Resuming queue processing after force complete...");
+        this.processQueue();
+      }, 2000);
       
       return true;
     }
     return false;
+  }
+
+  // New: Restart stuck queue
+  async restartQueue() {
+    console.log("🔄 Restarting stuck queue...");
+    
+    const currentRequest = this.currentRequestId;
+    const queueLength = this.queue.length;
+    
+    // Force complete current request
+    await this.forceCompleteCurrentRequest("Queue restart");
+    
+    // Clear failed requests cache
+    this.failedRequests.clear();
+    
+    console.log(`✅ Queue restarted. Previous current: ${currentRequest}, Queue length: ${queueLength}`);
+    
+    return {
+      previousCurrentRequest: currentRequest,
+      queueLength: queueLength,
+      restarted: true
+    };
   }
 }
 
 // ============= SINGLETON INSTANCE =============
 const cameraQueue = new CameraFeedingQueue();
 
+// Auto-restart mechanism: Check for stuck queue every 5 minutes
+setInterval(async () => {
+  const status = cameraQueue.getStatus();
+  
+  // If processing for more than 5 minutes, restart
+  if (status.processing && status.currentRequestId) {
+    const currentRequest = status.queuedRequests.find(r => r.id === status.currentRequestId);
+    if (currentRequest && currentRequest.age > 300) { // 5 minutes
+      console.log("🚨 Detected stuck queue, auto-restarting...");
+      await cameraQueue.restartQueue();
+    }
+  }
+}, 5 * 60 * 1000); // Check every 5 minutes
+
 // ============= PUBLIC API =============
 async function triggerCameraAndWait(servoCommand, purpose = "makanan") {
-  console.log(`New camera request: ${servoCommand}, purpose: ${purpose}`);
+  console.log(`📨 New camera request: ${servoCommand}, purpose: ${purpose}`);
   return await cameraQueue.addRequest(servoCommand, purpose);
 }
 
@@ -674,12 +757,16 @@ function getQueueStatus() {
   return cameraQueue.getStatus();
 }
 
-function clearQueue() {
-  return cameraQueue.clearQueue();
+function clearQueue(reason) {
+  return cameraQueue.clearQueue(reason);
 }
 
-function forceCompleteCurrentRequest() {
-  return cameraQueue.forceCompleteCurrentRequest();
+function forceCompleteCurrentRequest(reason) {
+  return cameraQueue.forceCompleteCurrentRequest(reason);
+}
+
+function restartQueue() {
+  return cameraQueue.restartQueue();
 }
 
 // ============= EXPORTS =============
@@ -687,9 +774,9 @@ module.exports = {
   triggerCameraAndWait,
   getQueueStatus,
   clearQueue,
-  forceCompleteCurrentRequest
+  forceCompleteCurrentRequest,
+  restartQueue
 };
-
 // ============= OPTIONAL: Express Routes untuk Monitoring =============
 /*
 // Tambahkan ke express app untuk monitoring
