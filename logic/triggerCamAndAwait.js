@@ -80,8 +80,8 @@ class CameraFeedingQueue {
           throw new Error(`ESP32 sedang sibuk: ${busyCheck.reason}`);
         }
 
-        // Get baseline photo before sending command (to detect new photos)
-        const baselinePhoto = await getLatestPhotoFromGCS('pakan-ikan123');
+        // Get baseline photo before sending command (to detect new photos) - USE DIRECT ACCESS
+        const baselinePhoto = await this.getLatestPhotoDirectFromGCS();
         const baselinePhotoId = baselinePhoto ? (baselinePhoto.name || baselinePhoto.fileName || baselinePhoto.id) : null;
         
         console.log(`📸 Baseline photo before command: ${baselinePhotoId}`);
