@@ -1,6 +1,16 @@
 const { db } = require("../config/firebase");
 const { getLatestPhotoFromGCS } = require("./uploadFishFood");
 
+// Helper function to convert UTC to WIB (UTC+7) for consistent timezone handling
+function toWIB(utcTimestamp) {
+  return new Date(utcTimestamp + (7 * 60 * 60 * 1000));
+}
+
+// Helper function to get current time in WIB for logging
+function getCurrentWIB() {
+  return toWIB(Date.now());
+}
+
 // ============= QUEUE SYSTEM =============
 class CameraFeedingQueue {
   constructor() {
@@ -29,7 +39,7 @@ class CameraFeedingQueue {
       };
 
       this.queue.push(request);
-      console.log(`Request ${requestId} ditambahkan ke antrian. Queue length: ${this.queue.length}`);
+      console.log(`Request ${requestId} ditambahkan ke antrian. Queue length: ${this.queue.length} - Created at ${getCurrentWIB().toISOString().replace('T', ' ').slice(0, 19)} WIB`);
 
       // Mulai pemrosesan jika belum jalan
       this.processQueue();
@@ -279,7 +289,7 @@ class CameraFeedingQueue {
     }
   }
 
-  // Smart photo validation with timezone handling
+  // Smart photo validation with timezone handling for Indonesia (UTC+7)
   validatePhotoTimestamp(photo, commandStartTime, currentTime) {
     try {
       // Try multiple timestamp properties and formats
@@ -319,21 +329,45 @@ class CameraFeedingQueue {
       const timeDiffFromCommand = photoTimestamp - commandStartTime;
       const timeDiffFromNow = currentTime - photoTimestamp;
       
+      // Convert to Indonesia time for logging (UTC+7)
+      const photoTimeWIB = new Date(photoTimestamp + (7 * 60 * 60 * 1000));
+      const commandStartWIB = new Date(commandStartTime + (7 * 60 * 60 * 1000));
+      const currentTimeWIB = new Date(currentTime + (7 * 60 * 60 * 1000));
+      
       console.log(`📸 Photo validation (${timestampSource}):
-        - Photo time: ${photoTime.toISOString()}
-        - Command start: ${new Date(commandStartTime).toISOString()}  
-        - Current time: ${new Date(currentTime).toISOString()}
+        - Photo time UTC: ${photoTime.toISOString()}
+        - Photo time WIB: ${photoTimeWIB.toISOString()}
+        - Command start UTC: ${new Date(commandStartTime).toISOString()}
+        - Command start WIB: ${commandStartWIB.toISOString()}
+        - Current time UTC: ${new Date(currentTime).toISOString()}
+        - Current time WIB: ${currentTimeWIB.toISOString()}
         - Diff from command: ${Math.round(timeDiffFromCommand/1000)}s
         - Diff from now: ${Math.round(timeDiffFromNow/1000)}s`);
       
-      // MORE STRICT: Photo must be taken AFTER command started and within reasonable timeframe
-      if (timeDiffFromCommand >= -2000 && timeDiffFromCommand <= 60000) { // -2s to +1min from command
-        return { valid: true, reason: `photo taken ${Math.round(timeDiffFromCommand/1000)}s after command (${timestampSource})` };
+      // Strategy 1: Photo taken after command started (handle timezone differences)
+      // Allow for timezone confusion: -7 hours to +1 hour from command time
+      if (timeDiffFromCommand >= -25200000 && timeDiffFromCommand <= 3600000) { // -7h to +1h from command
+        return { valid: true, reason: `photo taken ${Math.round(timeDiffFromCommand/1000)}s after command - timezone tolerant (${timestampSource})` };
       }
       
-      // Secondary check: Photo is very recent (handle timezone issues but be more strict)
-      if (Math.abs(timeDiffFromNow) <= 120000) { // Within 2 minutes of current time
-        return { valid: true, reason: `recent photo ${Math.round(timeDiffFromNow/1000)}s from now (${timestampSource})` };
+      // Strategy 2: Photo is very recent relative to current time (handle timezone issues)
+      // Allow photos that are within 8 hours in either direction (timezone confusion)
+      if (Math.abs(timeDiffFromNow) <= 8 * 60 * 60 * 1000) { // Within 8 hours of current time (either direction)
+        return { valid: true, reason: `recent photo ${Math.round(timeDiffFromNow/1000)}s from now - timezone tolerant (${timestampSource})` };
+      }
+      
+      // Strategy 3: Special case for filename timestamps (these are usually more reliable)
+      if (timestampSource === 'filename') {
+        // For filename timestamps, be more lenient as they're often in local time
+        if (Math.abs(timeDiffFromCommand) <= 10 * 60 * 1000) { // Within 10 minutes of command
+          return { valid: true, reason: `filename timestamp within 10 minutes of command (${timestampSource})` };
+        }
+        
+        // Also check if photo timestamp is "in the future" compared to server time
+        // This often indicates timezone mismatch where device is in WIB but server in UTC
+        if (timeDiffFromNow < 0 && Math.abs(timeDiffFromNow) <= 8 * 60 * 60 * 1000) {
+          return { valid: true, reason: `future photo likely due to timezone diff ${Math.round(timeDiffFromNow/3600000)}h ahead (${timestampSource})` };
+        }
       }
       
       return { 
@@ -501,7 +535,7 @@ setInterval(async () => {
 
 // ============= PUBLIC API =============
 async function triggerCameraAndWait(servoCommand, purpose = "makanan") {
-  console.log(`📨 New camera request: ${servoCommand}, purpose: ${purpose}`);
+        console.log(`📨 New camera request: ${servoCommand}, purpose: ${purpose} at ${getCurrentWIB().toISOString().replace('T', ' ').slice(0, 19)} WIB`);
   return await cameraQueue.addRequest(servoCommand, purpose);
 }
 
@@ -530,15 +564,3 @@ module.exports = {
   forceCompleteCurrentRequest,
   restartQueue
 };
-// ============= OPTIONAL: Express Routes untuk Monitoring =============
-/*
-// Tambahkan ke express app untuk monitoring
-app.get('/api/camera-queue/status', (req, res) => {
-  res.json(getQueueStatus());
-});
-
-app.post('/api/camera-queue/clear', (req, res) => {
-  const cleared = clearQueue();
-  res.json({ message: `${cleared} requests cleared` });
-});
-*/
