@@ -1,342 +1,3 @@
-// const { db } = require("../config/firebase");
-// const { getLatestPhotoFromGCS } = require("./uploadFishFood");
-
-// // ============= QUEUE SYSTEM =============
-// class CameraFeedingQueue {
-//   constructor() {
-//     this.queue = [];
-//     this.processing = false;
-//     this.currentRequestId = null;
-//     this.lock = false; // Tambah lock mechanism
-//     this.maxQueueSize = 10; // Prevent memory issues
-//   }
-
-//   // Tambah request ke antrian
-//   async addRequest(servoCommand, purpose = "makanan") {
-//     // Check queue size limit
-//     if (this.queue.length >= this.maxQueueSize) {
-//       throw new Error(`Queue full (${this.maxQueueSize}). Please try again later.`);
-//     }
-
-//     return new Promise((resolve, reject) => {
-//       const requestId = Date.now() + '-' + Math.random().toString(36).substr(2, 9);
-
-//       // Tambah timeout untuk promise
-//       const timeout = setTimeout(() => {
-//         // Remove from queue if still there
-//         const index = this.queue.findIndex(req => req.id === requestId);
-//         if (index > -1) {
-//           this.queue.splice(index, 1);
-//         }
-//         reject(new Error(`Request ${requestId} timeout after 2 minutes`));
-//       }, 120000); // 2 minutes
-
-//       const request = {
-//         id: requestId,
-//         servoCommand,
-//         purpose,
-//         resolve: (result) => {
-//           clearTimeout(timeout);
-//           resolve(result);
-//         },
-//         reject: (error) => {
-//           clearTimeout(timeout);
-//           reject(error);
-//         },
-//         timestamp: Date.now(),
-//         attempts: 0,
-//         maxAttempts: 3
-//       };
-
-//       this.queue.push(request);
-//       console.log(`Request ${requestId} queued. Position: ${this.queue.length}`);
-
-//       this.processQueue();
-//     });
-//   }
-
-//   // Priority queue for urgent requests
-//   addUrgentRequest(servoCommand, purpose = "urgent") {
-//     return new Promise((resolve, reject) => {
-//       const requestId = 'URGENT-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
-
-//       const request = {
-//         id: requestId,
-//         servoCommand,
-//         purpose,
-//         resolve,
-//         reject,
-//         timestamp: Date.now(),
-//         attempts: 0,
-//         maxAttempts: 3,
-//         urgent: true
-//       };
-
-//       // Add to front of queue
-//       this.queue.unshift(request);
-//       console.log(`🚨 URGENT request ${requestId} added to front of queue`);
-
-//       this.processQueue();
-//     });
-//   }
-
-//   // Proses antrian satu per satu
-//   async processQueue() {
-//     if (this.processing || this.queue.length === 0 || this.lock) {
-//       return;
-//     }
-
-//     this.processing = true;
-
-//     while (this.queue.length > 0) {
-//       const request = this.queue[0]; // Peek, don't shift yet
-//       this.currentRequestId = request.id;
-
-//       try {
-//         // Atomic lock check
-//         if (this.lock) {
-//           await this.delay(1000);
-//           continue;
-//         }
-
-//         this.lock = true; // Lock before status check
-
-//         const busyCheck = await this.checkESP32Status();
-//         if (busyCheck.isBusy) {
-//           this.lock = false;
-//           throw new Error(`ESP32 busy: ${busyCheck.reason}`);
-//         }
-
-//         // Now shift from queue since we're committed
-//         this.queue.shift();
-
-//         const result = await this.executeRequestWithRetry(request);
-//         this.lock = false;
-
-//         request.resolve(result);
-//         console.log(`✅ Request ${request.id} completed successfully`);
-
-//       } catch (error) {
-//         this.lock = false;
-
-//         // Handle retry logic
-//         request.attempts++;
-//         if (request.attempts < request.maxAttempts) {
-//           console.log(`🔄 Retrying request ${request.id} (${request.attempts}/${request.maxAttempts})`);
-//           // Put back to front of queue for retry
-//           this.queue.unshift(request);
-//           await this.delay(5000); // Wait before retry
-//         } else {
-//           // Remove from queue and reject
-//           const index = this.queue.findIndex(req => req.id === request.id);
-//           if (index > -1) this.queue.splice(index, 1);
-
-//           console.error(`❌ Request ${request.id} failed permanently:`, error.message);
-//           request.reject(error);
-//         }
-//       }
-
-//       await this.delay(2000); // Inter-request delay
-//     }
-
-//     this.processing = false;
-//     this.currentRequestId = null;
-//     console.log("✅ All queue requests processed");
-//   }
-
-//   // Cek status ESP32 sebelum kirim command
-//   async checkESP32Status() {
-//     try {
-//       // Cek apakah sedang memproses
-//       const statusSnap = await db.ref("deviceStatus/camera_busy").once("value");
-//       const isCameraBusy = statusSnap.val() === true || statusSnap.val() === "true";
-
-//       if (isCameraBusy) {
-//         return { isBusy: true, reason: "Camera sedang digunakan" };
-//       }
-
-//       // Cek apakah ada command yang belum diproses
-//       const commandSnap = await db.ref("checkCameraMoveCommand/status").once("value");
-//       const commandStatus = commandSnap.val();
-
-//       if (commandStatus === 1) {
-//         return { isBusy: true, reason: "Masih ada command yang belum selesai" };
-//       }
-
-//       return { isBusy: false };
-//     } catch (error) {
-//       return { isBusy: true, reason: `Error checking status: ${error.message}` };
-//     }
-//   }
-
-//   // Eksekusi request dengan retry
-//   async executeRequestWithRetry(request) {
-//     console.log(`🚀 Executing request ${request.id}: ${request.servoCommand}`);
-
-//     const commandId = request.id;
-
-//     // Set command dengan atomic operation
-//     await db.ref("checkCameraMoveCommand").transaction((current) => {
-//       // Only set if not busy
-//       if (!current || current.status === 0) {
-//         return {
-//           commandId: commandId,
-//           moveServo: request.servoCommand,
-//           status: 1,
-//           timestamp: Date.now(),
-//           purpose: request.purpose
-//         };
-//       }
-//       return undefined; // Abort transaction
-//     });
-
-//     try {
-//       const result = await this.waitForCompletion(commandId);
-
-//       // Clean up
-//       await db.ref("checkCameraMoveCommand").set({
-//         commandId: null,
-//         moveServo: null,
-//         status: 0,
-//         timestamp: null,
-//         purpose: null
-//       });
-
-//       return result;
-
-//     } catch (error) {
-//       // Clean up on error
-//       await db.ref("checkCameraMoveCommand").set({
-//         commandId: null,
-//         moveServo: null,
-//         status: 0,
-//         timestamp: null,
-//         purpose: null
-//       });
-//       throw error;
-//     }
-//   }
-
-//   // Tunggu completion dengan monitoring detail
-//   async waitForCompletion(commandId, maxWait = 40000) {
-//     const startTime = Date.now();
-//     let waited = 0;
-//     const interval = 1000;
-//     let consecutiveErrors = 0;
-//     const maxConsecutiveErrors = 5;
-
-//     console.log(`⏳ Waiting for completion: ${commandId}`);
-
-//     while (waited < maxWait) {
-//       try {
-//         const snap = await db.ref("checkCameraMoveCommand").once("value");
-//         const commandData = snap.val();
-
-//         if (!commandData || commandData.commandId !== commandId) {
-//           consecutiveErrors++;
-//           if (consecutiveErrors >= maxConsecutiveErrors) {
-//             throw new Error("Command data consistency error");
-//           }
-//           await this.delay(interval);
-//           waited += interval;
-//           continue;
-//         }
-
-//         consecutiveErrors = 0; // Reset error counter
-
-//         if (commandData.status === 0) {
-//           console.log(`✅ Command ${commandId} completed, fetching photo...`);
-
-//           const latestPhoto = await getLatestPhotoFromGCS('pakan-ikan1234');
-
-//           if (latestPhoto) {
-//             // Uncomment and fix photo validation
-//             const photoTime = new Date(latestPhoto.timeCreated);
-//             const commandTime = new Date(startTime - 5000); // 5s tolerance
-
-//             if (photoTime >= commandTime) {
-//               console.log(`📸 Photo validated: ${latestPhoto.name}`);
-//               return latestPhoto;
-//             } else {
-//               console.log(`⚠️  Photo too old, waiting for newer one...`);
-//             }
-//           }
-//         }
-
-//       } catch (error) {
-//         consecutiveErrors++;
-//         console.error(`Error monitoring ${commandId}:`, error.message);
-
-//         if (consecutiveErrors >= maxConsecutiveErrors) {
-//           throw new Error(`Too many consecutive errors: ${error.message}`);
-//         }
-//       }
-
-//       await this.delay(interval);
-//       waited += interval;
-//     }
-
-//     throw new Error(`Timeout: Command ${commandId} not completed in ${maxWait}ms`);
-//   }
-
-//   delay(ms) {
-//     return new Promise(resolve => setTimeout(resolve, ms));
-//   }
-
-//   // Enhanced status with more details
-//   getStatus() {
-//     return {
-//       queueLength: this.queue.length,
-//       processing: this.processing,
-//       locked: this.lock,
-//       currentRequestId: this.currentRequestId,
-//       queuedRequests: this.queue.map(req => ({
-//         id: req.id,
-//         servoCommand: req.servoCommand,
-//         purpose: req.purpose,
-//         attempts: req.attempts,
-//         maxAttempts: req.maxAttempts,
-//         timestamp: req.timestamp,
-//         waitTime: Date.now() - req.timestamp
-//       }))
-//     };
-//   }
-
-//   // Clear queue (emergency)
-//   clearQueue() {
-//     const rejectedCount = this.queue.length;
-//     this.queue.forEach(req => {
-//       req.reject(new Error("Queue cleared by admin"));
-//     });
-//     this.queue = [];
-//     this.lock = false;
-//     console.log(`🧹 Queue cleared: ${rejectedCount} requests canceled`);
-//     return rejectedCount;
-//   }
-// }
-
-// // ============= SINGLETON INSTANCE =============
-// const cameraQueue = new CameraFeedingQueue();
-
-// // ============= PUBLIC API =============
-// async function triggerCameraAndWait(servoCommand, purpose = "makanan") {
-//   console.log(`New camera request: ${servoCommand}, purpose: ${purpose}`);
-//   return await cameraQueue.addRequest(servoCommand, purpose);
-// }
-
-// // Admin functions
-// function getQueueStatus() {
-//   return cameraQueue.getStatus();
-// }
-
-// function clearQueue() {
-//   return cameraQueue.clearQueue();
-// }
-// module.exports = { 
-//   triggerCameraAndWait,
-//   getQueueStatus,
-//   clearQueue
-//  };
 const { db } = require("../config/firebase");
 const { getLatestPhotoFromGCS } = require("./uploadFishFood");
 
@@ -346,7 +7,8 @@ class CameraFeedingQueue {
     this.queue = [];
     this.processing = false;
     this.currentRequestId = null;
-    this.failedRequests = new Map(); // Track failed requests to prevent infinite retry
+    this.failedRequests = new Map();
+    this.photoReservations = new Map(); // Track which photos belong to which requests
   }
 
   // Tambah request ke antrian
@@ -408,8 +70,14 @@ class CameraFeedingQueue {
           throw new Error(`ESP32 sedang sibuk: ${busyCheck.reason}`);
         }
 
+        // Get baseline photo before sending command (to detect new photos)
+        const baselinePhoto = await getLatestPhotoFromGCS('pakan-ikan123');
+        const baselinePhotoId = baselinePhoto ? (baselinePhoto.name || baselinePhoto.fileName || baselinePhoto.id) : null;
+        
+        console.log(`📸 Baseline photo before command: ${baselinePhotoId}`);
+
         // Eksekusi request dengan timeout
-        const result = await this.executeRequestWithTimeout(request);
+        const result = await this.executeRequestWithTimeout(request, baselinePhotoId);
         request.resolve(result);
         
         console.log(`✅ Request ${request.id} berhasil diproses`);
@@ -429,7 +97,7 @@ class CameraFeedingQueue {
           
           // Add back to front of queue for retry
           this.queue.unshift(request);
-          
+            
           // Wait before retry
           await this.delay(3000);
           continue;
@@ -438,7 +106,7 @@ class CameraFeedingQueue {
         // Request failed permanently
         this.recordFailure(`${request.servoCommand}-${request.purpose}`);
         request.reject(error);
-      }
+      } 
       
       // Reset current request
       this.currentRequestId = null;
@@ -452,11 +120,11 @@ class CameraFeedingQueue {
   }
 
   // Execute request with overall timeout
-  async executeRequestWithTimeout(request) {
+  async executeRequestWithTimeout(request, baselinePhotoId) {
     const TOTAL_TIMEOUT = 120000; // 2 minutes total timeout per request
     
     return Promise.race([
-      this.executeRequest(request),
+      this.executeRequest(request, baselinePhotoId),
       new Promise((_, reject) => 
         setTimeout(() => reject(new Error(`Request ${request.id} timeout after ${TOTAL_TIMEOUT}ms`)), TOTAL_TIMEOUT)
       )
@@ -488,8 +156,8 @@ class CameraFeedingQueue {
     }
   }
 
-  // Eksekusi request individual - SIMPLIFIED WITH BETTER ERROR HANDLING
-  async executeRequest(request) {
+  // Eksekusi request individual - IMPROVED WITH STRICT PHOTO DETECTION
+  async executeRequest(request, baselinePhotoId) {
     const commandId = request.id + `-attempt${request.attempts + 1}`;
     
     try {
@@ -505,7 +173,7 @@ class CameraFeedingQueue {
       });
 
       // 2. Tunggu sampai selesai dengan monitoring yang lebih strict
-      const result = await this.waitForCompletionWithStrictTimeout(commandId);
+      const result = await this.waitForCompletionWithStrictTimeout(commandId, baselinePhotoId);
 
       // 3. Bersihkan command
       await this.cleanupCommand();
@@ -526,8 +194,8 @@ class CameraFeedingQueue {
     }
   }
 
-  // Wait for completion with strict timeout and better photo checking
-  async waitForCompletionWithStrictTimeout(commandId) {
+  // Wait for completion with STRICT photo ownership
+  async waitForCompletionWithStrictTimeout(commandId, baselinePhotoId) {
     const COMMAND_TIMEOUT = 30000; // 30 seconds for ESP32 to complete
     const PHOTO_TIMEOUT = 60000;   // 60 seconds to find photo
     const CHECK_INTERVAL = 1000;   // Check every 1 second
@@ -535,9 +203,9 @@ class CameraFeedingQueue {
     let commandStartTime = Date.now();
     let commandCompleted = false;
     let photoCheckStartTime = null;
-    let lastPhotoCheck = null;
     
     console.log(`⏳ Waiting for command ${commandId} completion...`);
+    console.log(`📸 Baseline photo ID: ${baselinePhotoId}`);
 
     while (true) {
       const now = Date.now();
@@ -565,56 +233,40 @@ class CameraFeedingQueue {
           }
         }
 
-        // Phase 2: Wait for photo after command completion
+        // Phase 2: Wait for NEW photo after command completion
         if (commandCompleted) {
           // Check photo timeout
           const photoWaitTime = now - photoCheckStartTime;
           if (photoWaitTime > PHOTO_TIMEOUT) {
-            // Before failing, try one more time with any recent photo
-            console.log(`⚠️ Photo timeout reached, trying fallback strategy...`);
-            const fallbackPhoto = await this.findRecentPhoto(commandStartTime);
-            if (fallbackPhoto) {
-              return fallbackPhoto;
-            }
             throw new Error(`Photo not found for ${commandId} after ${PHOTO_TIMEOUT}ms`);
           }
 
-          console.log(`📸 Checking for photo (${Math.round(photoWaitTime/1000)}s since completion)...`);
+          console.log(`📸 Checking for NEW photo (${Math.round(photoWaitTime/1000)}s since completion)...`);
           
           const latestPhoto = await getLatestPhotoFromGCS('pakan-ikan123');
           
           if (latestPhoto) {
-            // Debug: Log photo object structure
-            console.log(`📸 Photo object:`, {
-              name: latestPhoto.name,
-              fileName: latestPhoto.fileName,
-              id: latestPhoto.id,
-              timeCreated: latestPhoto.timeCreated,
-              updated: latestPhoto.updated,
-              keys: Object.keys(latestPhoto)
-            });
+            const currentPhotoId = latestPhoto.name || latestPhoto.fileName || latestPhoto.id || 'unknown';
             
-            // Get photo identifier - handle different property names
-            const photoId = latestPhoto.name || latestPhoto.fileName || latestPhoto.id || 'unknown';
-            const lastPhotoId = lastPhotoCheck ? (lastPhotoCheck.name || lastPhotoCheck.fileName || lastPhotoCheck.id) : null;
-            
-            // Strategy 1: Check if this is a new photo since we started
-            if (!lastPhotoCheck || photoId !== lastPhotoId) {
-              console.log(`📸 New photo detected: ${photoId}`);
+            // STRICT CHECK: Only accept if this is a NEW photo (different from baseline)
+            if (currentPhotoId !== baselinePhotoId) {
+              console.log(`📸 NEW photo detected: ${currentPhotoId} (baseline was: ${baselinePhotoId})`);
               
-              // Strategy 2: Validate photo timestamp with timezone tolerance
+              // Additional validation: photo should be recent enough
               const isValidPhoto = this.validatePhotoTimestamp(latestPhoto, commandStartTime, now);
               if (isValidPhoto.valid) {
-                console.log(`📸 Valid photo found for ${commandId}: ${photoId} (${isValidPhoto.reason})`);
+                // Reserve this photo for this command to prevent other requests from taking it
+                this.photoReservations.set(currentPhotoId, commandId);
+                console.log(`📸 Photo reserved for ${commandId}: ${currentPhotoId} (${isValidPhoto.reason})`);
                 return latestPhoto;
               } else {
-                console.log(`📸 Photo rejected: ${isValidPhoto.reason}`);
+                console.log(`📸 NEW photo rejected due to timing: ${isValidPhoto.reason}`);
               }
             } else {
-              console.log(`📸 Same photo as before: ${photoId}, waiting for new one...`);
+              console.log(`📸 Same photo as baseline: ${currentPhotoId}, waiting for new upload...`);
             }
-            
-            lastPhotoCheck = latestPhoto;
+          } else {
+            console.log(`📸 No photo found in GCS`);
           }
         }
 
@@ -674,58 +326,24 @@ class CameraFeedingQueue {
         - Diff from command: ${Math.round(timeDiffFromCommand/1000)}s
         - Diff from now: ${Math.round(timeDiffFromNow/1000)}s`);
       
-      // Strategy 1: Photo taken after command started (ideal case)
-      if (timeDiffFromCommand >= -5000 && timeDiffFromCommand <= 120000) { // -5s to +2min from command
+      // MORE STRICT: Photo must be taken AFTER command started and within reasonable timeframe
+      if (timeDiffFromCommand >= -2000 && timeDiffFromCommand <= 60000) { // -2s to +1min from command
         return { valid: true, reason: `photo taken ${Math.round(timeDiffFromCommand/1000)}s after command (${timestampSource})` };
       }
       
-      // Strategy 2: Photo is very recent (handle timezone issues)
-      if (Math.abs(timeDiffFromNow) <= 300000) { // Within 5 minutes of current time (either direction)
+      // Secondary check: Photo is very recent (handle timezone issues but be more strict)
+      if (Math.abs(timeDiffFromNow) <= 120000) { // Within 2 minutes of current time
         return { valid: true, reason: `recent photo ${Math.round(timeDiffFromNow/1000)}s from now (${timestampSource})` };
-      }
-      
-      // Strategy 3: For timezone issues, check if photo could be from this session
-      // If server thinks photo is from future but within reasonable range, accept it
-      if (timeDiffFromNow < 0 && Math.abs(timeDiffFromNow) <= 8 * 60 * 60 * 1000) { // Up to 8 hours in "future"
-        return { valid: true, reason: `timezone-adjusted photo ${Math.round(timeDiffFromNow/3600000)}h ahead (${timestampSource})` };
       }
       
       return { 
         valid: false, 
-        reason: `photo too old/distant: ${Math.round(timeDiffFromCommand/1000)}s from command, ${Math.round(timeDiffFromNow/1000)}s from now (${timestampSource})` 
+        reason: `photo timing invalid: ${Math.round(timeDiffFromCommand/1000)}s from command, ${Math.round(timeDiffFromNow/1000)}s from now (${timestampSource})` 
       };
       
     } catch (error) {
       console.error("Error validating photo timestamp:", error);
       return { valid: false, reason: `validation error: ${error.message}` };
-    }
-  }
-
-  // Fallback: Find any photo that might be from this command session
-  async findRecentPhoto(commandStartTime) {
-    try {
-      console.log(`🔍 Searching for any recent photo since command started...`);
-      const photo = await getLatestPhotoFromGCS('pakan-ikan123');
-      
-      if (photo) {
-        const photoId = photo.name || photo.fileName || photo.id || 'unknown';
-        console.log(`🔍 Found photo in fallback: ${photoId}`);
-        
-        const validation = this.validatePhotoTimestamp(photo, commandStartTime, Date.now());
-        if (validation.valid) {
-          console.log(`📸 Fallback photo accepted: ${photoId} (${validation.reason})`);
-          return photo;
-        } else {
-          console.log(`📸 Fallback photo rejected: ${validation.reason}`);
-        }
-      } else {
-        console.log(`🔍 No photo found in fallback search`);
-      }
-      
-      return null;
-    } catch (error) {
-      console.error("Error in fallback photo search:", error);
-      return null;
     }
   }
 
@@ -784,6 +402,7 @@ class CameraFeedingQueue {
       queueLength: this.queue.length,
       processing: this.processing,
       currentRequestId: this.currentRequestId,
+      photoReservations: Object.fromEntries(this.photoReservations),
       queuedRequests: this.queue.map(req => ({
         id: req.id,
         servoCommand: req.servoCommand,
@@ -808,6 +427,9 @@ class CameraFeedingQueue {
     // Reset processing state
     this.processing = false;
     this.currentRequestId = null;
+    
+    // Clear photo reservations
+    this.photoReservations.clear();
     
     console.log(`🧹 Queue cleared (${reason}). ${rejectedCount} requests rejected.`);
     return rejectedCount;
@@ -846,8 +468,9 @@ class CameraFeedingQueue {
     // Force complete current request
     await this.forceCompleteCurrentRequest("Queue restart");
     
-    // Clear failed requests cache
+    // Clear failed requests cache and photo reservations
     this.failedRequests.clear();
+    this.photoReservations.clear();
     
     console.log(`✅ Queue restarted. Previous current: ${currentRequest}, Queue length: ${queueLength}`);
     
