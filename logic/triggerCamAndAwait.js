@@ -87,7 +87,7 @@ class CameraFeedingQueue {
         console.log(`📸 Baseline photo before command: ${baselinePhotoId}`);
 
         // Eksekusi request dengan timeout
-        const result = await this.executeRequestWithTimeout(request, baselinePhotoId);
+        const result = await this.executeRequestWithTimeout(request, baselinePhotoId, commandStartTimestamp);
         request.resolve(result);
         
         console.log(`✅ Request ${request.id} berhasil diproses`);
@@ -130,11 +130,11 @@ class CameraFeedingQueue {
   }
 
   // Execute request with overall timeout
-  async executeRequestWithTimeout(request, baselinePhotoId) {
+  async executeRequestWithTimeout(request, baselinePhotoId, commandStartTimestamp) {
     const TOTAL_TIMEOUT = 120000; // 2 minutes total timeout per request
     
     return Promise.race([
-      this.executeRequest(request, baselinePhotoId),
+      this.executeRequest(request, baselinePhotoId, commandStartTimestamp),
       new Promise((_, reject) => 
         setTimeout(() => reject(new Error(`Request ${request.id} timeout after ${TOTAL_TIMEOUT}ms`)), TOTAL_TIMEOUT)
       )
@@ -167,7 +167,7 @@ class CameraFeedingQueue {
   }
 
   // Eksekusi request individual - IMPROVED WITH STRICT PHOTO DETECTION
-  async executeRequest(request, baselinePhotoId) {
+  async executeRequest(request, baselinePhotoId, commandStartTimestamp) {
     const commandId = request.id + `-attempt${request.attempts + 1}`;
     
     try {
@@ -183,7 +183,7 @@ class CameraFeedingQueue {
       });
 
       // 2. Tunggu sampai selesai dengan monitoring yang lebih strict
-      const result = await this.waitForCompletionWithStrictTimeout(commandId, baselinePhotoId);
+      const result = await this.waitForCompletionWithStrictTimeout(commandId, baselinePhotoId, commandStartTimestamp);
 
       // 3. Bersihkan command
       await this.cleanupCommand();
@@ -526,19 +526,22 @@ async function getLatestPhotoDirectFromGCS() {
     try {
       const uploadModule = require("./uploadFishFood");
       bucket = uploadModule.bucket;
+      
+      if (!bucket) {
+        console.log(`📸 Bucket not exported from uploadFishFood, using fallback...`);
+        return await getLatestPhotoWithTimeout();
+      }
+      
     } catch (importError) {
-      console.log(`⚠️ Could not import bucket directly, trying alternative...`);
-      // Alternative: use getLatestPhotoFromGCS but with timeout to avoid infinite wait
-      return await getLatestPhotoWithTimeout();
-    }
-    
-    if (!bucket) {
-      console.log(`⚠️ Bucket not available, using fallback method...`);
+      console.log(`📸 Cannot import bucket directly, using fallback method...`);
       return await getLatestPhotoWithTimeout();
     }
     
     const [files] = await bucket.getFiles({ prefix: 'photo_' });
-    if (!files.length) return null;
+    if (!files.length) {
+      console.log(`📸 No photos found in GCS bucket`);
+      return null;
+    }
     
     // Urutkan berdasarkan timestamp pada nama file
     files.sort((a, b) => {
@@ -550,11 +553,11 @@ async function getLatestPhotoDirectFromGCS() {
     const latestFile = files[0];
     const [buffer] = await latestFile.download();
     
-    console.log(`📸 Direct GCS fetch: ${latestFile.name}`);
+    console.log(`📸 Direct GCS fetch successful: ${latestFile.name}`);
     return { buffer, fileName: latestFile.name };
     
   } catch (error) {
-    console.error(`❌ Error fetching directly from GCS:`, error.message);
+    console.log(`📸 Direct GCS access failed (${error.message}), using fallback...`);
     return await getLatestPhotoWithTimeout();
   }
 }
