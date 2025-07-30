@@ -81,7 +81,7 @@ class CameraFeedingQueue {
         }
 
         // Get baseline photo before sending command (to detect new photos) - USE DIRECT ACCESS
-        const baselinePhoto = await getLatestPhotoFromGCS('pakan-ikan123');
+        const baselinePhoto = await getLatestPhotoDirectFromGCS();
         const baselinePhotoId = baselinePhoto ? (baselinePhoto.name || baselinePhoto.fileName || baselinePhoto.id) : null;
         
         console.log(`📸 Baseline photo before command: ${baselinePhotoId}`);
@@ -513,6 +513,71 @@ class CameraFeedingQueue {
       queueLength: queueLength,
       restarted: true
     };
+  }
+}
+
+// ============= HELPER FUNCTIONS OUTSIDE CLASS =============
+
+// Direct GCS access without polling flag interference
+async function getLatestPhotoDirectFromGCS() {
+  try {
+    // Try to import bucket from uploadFishFood module
+    let bucket;
+    try {
+      const uploadModule = require("./uploadFishFood");
+      bucket = uploadModule.bucket;
+    } catch (importError) {
+      console.log(`⚠️ Could not import bucket directly, trying alternative...`);
+      // Alternative: use getLatestPhotoFromGCS but with timeout to avoid infinite wait
+      return await getLatestPhotoWithTimeout();
+    }
+    
+    if (!bucket) {
+      console.log(`⚠️ Bucket not available, using fallback method...`);
+      return await getLatestPhotoWithTimeout();
+    }
+    
+    const [files] = await bucket.getFiles({ prefix: 'photo_' });
+    if (!files.length) return null;
+    
+    // Urutkan berdasarkan timestamp pada nama file
+    files.sort((a, b) => {
+      const aTime = parseInt(a.name.match(/\d+/)?.[0] || "0");
+      const bTime = parseInt(b.name.match(/\d+/)?.[0] || "0");
+      return bTime - aTime;
+    });
+    
+    const latestFile = files[0];
+    const [buffer] = await latestFile.download();
+    
+    console.log(`📸 Direct GCS fetch: ${latestFile.name}`);
+    return { buffer, fileName: latestFile.name };
+    
+  } catch (error) {
+    console.error(`❌ Error fetching directly from GCS:`, error.message);
+    return await getLatestPhotoWithTimeout();
+  }
+}
+
+// Fallback method with timeout to prevent infinite waiting
+async function getLatestPhotoWithTimeout() {
+  const PHOTO_FETCH_TIMEOUT = 5000; // 5 seconds timeout
+  
+  try {
+    console.log(`📸 Using fallback getLatestPhotoFromGCS with timeout...`);
+    
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('Photo fetch timeout')), PHOTO_FETCH_TIMEOUT)
+    );
+    
+    const photoPromise = getLatestPhotoFromGCS('pakan-ikan123');
+    
+    const result = await Promise.race([photoPromise, timeoutPromise]);
+    return result;
+    
+  } catch (error) {
+    console.log(`⚠️ Fallback photo fetch failed: ${error.message}`);
+    return null;
   }
 }
 
