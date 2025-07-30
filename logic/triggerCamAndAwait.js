@@ -130,11 +130,11 @@ class CameraFeedingQueue {
   }
 
   // Execute request with overall timeout
-  async executeRequestWithTimeout(request, baselinePhotoId, commandStartTimestamp) {
+  async executeRequestWithTimeout(request, baselinePhotoId) {
     const TOTAL_TIMEOUT = 120000; // 2 minutes total timeout per request
     
     return Promise.race([
-      this.executeRequest(request, baselinePhotoId, commandStartTimestamp),
+      this.executeRequest(request, baselinePhotoId),
       new Promise((_, reject) => 
         setTimeout(() => reject(new Error(`Request ${request.id} timeout after ${TOTAL_TIMEOUT}ms`)), TOTAL_TIMEOUT)
       )
@@ -167,23 +167,26 @@ class CameraFeedingQueue {
   }
 
   // Eksekusi request individual - IMPROVED WITH STRICT PHOTO DETECTION
-  async executeRequest(request, baselinePhotoId, commandStartTimestamp) {
+  async executeRequest(request, baselinePhotoId) {
     const commandId = request.id + `-attempt${request.attempts + 1}`;
     
     try {
       console.log(`📤 Sending command ${commandId}: ${request.servoCommand}`);
+
+      // Record the actual command start time for photo validation
+      const actualCommandStartTime = Date.now();
 
       // 1. Kirim perintah dengan timestamp unik
       await db.ref("checkCameraMoveCommand").set({
         commandId: commandId,
         moveServo: request.servoCommand,
         status: 1,
-        timestamp: Date.now(),
+        timestamp: actualCommandStartTime,
         purpose: request.purpose
       });
 
       // 2. Tunggu sampai selesai dengan monitoring yang lebih strict
-      const result = await this.waitForCompletionWithStrictTimeout(commandId, baselinePhotoId, commandStartTimestamp);
+      const result = await this.waitForCompletionWithStrictTimeout(commandId, baselinePhotoId, actualCommandStartTime);
 
       // 3. Bersihkan command
       await this.cleanupCommand();
