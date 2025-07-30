@@ -1,6 +1,6 @@
 const { db } = require("../config/firebase");
 const { getLatestPhotoFromGCS } = require("./uploadFishFood");
-
+const {storage, bucket} = require("../config/storage");
 // Helper function to convert UTC to WIB (UTC+7) for consistent timezone handling
 function toWIB(utcTimestamp) {
   return new Date(utcTimestamp + (7 * 60 * 60 * 1000));
@@ -87,7 +87,7 @@ class CameraFeedingQueue {
         console.log(`📸 Baseline photo before command: ${baselinePhotoId}`);
 
         // Eksekusi request dengan timeout
-        const result = await this.executeRequestWithTimeout(request, baselinePhotoId, commandStartTimestamp);
+        const result = await this.executeRequestWithTimeout(request, baselinePhotoId);
         request.resolve(result);
         
         console.log(`✅ Request ${request.id} berhasil diproses`);
@@ -524,41 +524,31 @@ class CameraFeedingQueue {
 // Direct GCS access without polling flag interference
 async function getLatestPhotoDirectFromGCS() {
   try {
-    // Try to import bucket from uploadFishFood module
-    let bucket;
-    try {
-      const uploadModule = require("./uploadFishFood");
-      bucket = uploadModule.bucket;
-      
-      if (!bucket) {
-        console.log(`📸 Bucket not exported from uploadFishFood, using fallback...`);
-        return await getLatestPhotoWithTimeout();
-      }
-      
-    } catch (importError) {
-      console.log(`📸 Cannot import bucket directly, using fallback method...`);
+    const { bucket } = require("../config/storage");
+    if (!bucket) {
+      console.log(`📸 Bucket not found in config/storage, using fallback...`);
       return await getLatestPhotoWithTimeout();
     }
-    
+
     const [files] = await bucket.getFiles({ prefix: 'photo_' });
     if (!files.length) {
       console.log(`📸 No photos found in GCS bucket`);
       return null;
     }
-    
+
     // Urutkan berdasarkan timestamp pada nama file
     files.sort((a, b) => {
       const aTime = parseInt(a.name.match(/\d+/)?.[0] || "0");
       const bTime = parseInt(b.name.match(/\d+/)?.[0] || "0");
       return bTime - aTime;
     });
-    
+
     const latestFile = files[0];
     const [buffer] = await latestFile.download();
-    
+
     console.log(`📸 Direct GCS fetch successful: ${latestFile.name}`);
     return { buffer, fileName: latestFile.name };
-    
+
   } catch (error) {
     console.log(`📸 Direct GCS access failed (${error.message}), using fallback...`);
     return await getLatestPhotoWithTimeout();
