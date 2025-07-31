@@ -1,7 +1,6 @@
 const { db } = require("../config/firebase");
 const { getLatestPhotoFromGCS } = require("./uploadFishFood");
 const {storage, bucket} = require("../config/storage");
-
 // Helper function to convert UTC to WIB (UTC+7) for consistent timezone handling
 function toWIB(utcTimestamp) {
   return new Date(utcTimestamp + (7 * 60 * 60 * 1000));
@@ -81,7 +80,7 @@ class CameraFeedingQueue {
           throw new Error(`ESP32 sedang sibuk: ${busyCheck.reason}`);
         }
 
-        // Get baseline photo before sending command (for logging purposes only)
+        // Get baseline photo before sending command (to detect new photos) - USE DIRECT ACCESS
         const baselinePhoto = await getLatestPhotoDirectFromGCS();
         const baselinePhotoId = baselinePhoto ? (baselinePhoto.name || baselinePhoto.fileName || baselinePhoto.id) : null;
         
@@ -167,50 +166,32 @@ class CameraFeedingQueue {
     }
   }
 
-  // FIXED: Eksekusi request individual - SIMPLIFIED VERSION
+  // Eksekusi request individual - IMPROVED WITH STRICT PHOTO DETECTION
   async executeRequest(request, baselinePhotoId) {
     const commandId = request.id + `-attempt${request.attempts + 1}`;
     
     try {
       console.log(`📤 Sending command ${commandId}: ${request.servoCommand}`);
 
+      // Record the actual command start time for photo validation
+      const actualCommandStartTime = Date.now();
+
       // 1. Kirim perintah dengan timestamp unik
       await db.ref("checkCameraMoveCommand").set({
         commandId: commandId,
         moveServo: request.servoCommand,
         status: 1,
-        timestamp: Date.now(),
+        timestamp: actualCommandStartTime,
         purpose: request.purpose
       });
 
-      // 2. Tunggu ESP32 selesai SAJA (tidak ribet mikirin foto)
-      await this.waitForESP32CompletionOnly(commandId);
+      // 2. Tunggu sampai selesai dengan monitoring yang lebih strict
+      const result = await this.waitForCompletionWithStrictTimeout(commandId, baselinePhotoId, actualCommandStartTime);
 
-      // 3. Tunggu sebentar untuk photo processing/upload
-      console.log(`⏳ Waiting 5 seconds for photo processing...`);
-      await this.delay(5000);
-
-      // 4. Ambil foto terbaru apapun itu (baru atau lama)
-      const latestPhoto = await getLatestPhotoFromGCS('pakan-ikan1234', true); // Skip polling!
-      
-      if (!latestPhoto) {
-        throw new Error(`No photo available after command ${commandId}`);
-      }
-
-      const photoId = latestPhoto.name || latestPhoto.fileName || latestPhoto.id || 'unknown';
-      console.log(`📸 Using photo: ${photoId}`);
-      
-      // Optional: Log apakah ini foto baru atau sama (untuk debugging)
-      if (baselinePhotoId && photoId !== baselinePhotoId) {
-        console.log(`📸 ✅ NEW photo detected (different from baseline: ${baselinePhotoId})`);
-      } else if (baselinePhotoId) {
-        console.log(`📸 ⚠️ SAME photo as baseline (ESP32 might not have taken new photo)`);
-      }
-
-      // 5. Bersihkan command
+      // 3. Bersihkan command
       await this.cleanupCommand();
 
-      return latestPhoto;
+      return result;
 
     } catch (error) {
       console.error(`❌ Execute request failed for ${commandId}:`, error.message);
@@ -226,42 +207,180 @@ class CameraFeedingQueue {
     }
   }
 
-  // SIMPLE: Tunggu ESP32 selesai saja, tanpa ribet foto
-  async waitForESP32CompletionOnly(commandId) {
-    const COMMAND_TIMEOUT = 30000; // 30 seconds
+  // Wait for completion with STRICT photo ownership
+  async waitForCompletionWithStrictTimeout(commandId, baselinePhotoId) {
+    const COMMAND_TIMEOUT = 30000; // 30 seconds for ESP32 to complete
+    const PHOTO_TIMEOUT = 60000;   // 60 seconds to find photo
     const CHECK_INTERVAL = 1000;   // Check every 1 second
-    const startTime = Date.now();
     
-    console.log(`⏳ Waiting for ESP32 to complete command ${commandId}...`);
+    let commandStartTime = Date.now();
+    let commandCompleted = false;
+    let photoCheckStartTime = null;
     
+    console.log(`⏳ Waiting for command ${commandId} completion...`);
+    console.log(`📸 Baseline photo ID: ${baselinePhotoId}`);
+
     while (true) {
       const now = Date.now();
       
-      // Check timeout
-      if (now - startTime > COMMAND_TIMEOUT) {
-        throw new Error(`Command ${commandId} timeout - ESP32 tidak merespons dalam ${COMMAND_TIMEOUT}ms`);
-      }
+      try {
+        // Phase 1: Wait for ESP32 to complete command
+        if (!commandCompleted) {
+          // Check command timeout
+          if (now - commandStartTime > COMMAND_TIMEOUT) {
+            throw new Error(`Command ${commandId} timeout - ESP32 tidak merespons dalam ${COMMAND_TIMEOUT}ms`);
+          }
 
-      const snap = await db.ref("checkCameraMoveCommand").once("value");
-      const commandData = snap.val();
-      
-      if (!commandData || commandData.commandId !== commandId) {
-        throw new Error(`Command ${commandId} data corrupted or not found`);
-      }
+          const snap = await db.ref("checkCameraMoveCommand").once("value");
+          const commandData = snap.val();
+          
+          if (!commandData || commandData.commandId !== commandId) {
+            throw new Error(`Command ${commandId} data corrupted or not found`);
+          }
 
-      // Check if command completed
-      if (commandData.status === 0) {
-        console.log(`✅ ESP32 completed command ${commandId}`);
-        return;
-      }
-      
-      // Show progress every 5 seconds
-      const elapsed = Math.round((now - startTime) / 1000);
-      if (elapsed % 5 === 0 && elapsed > 0) {
-        console.log(`⏳ ESP32 still processing ${commandId}... (${elapsed}s elapsed)`);
+          // Check if command completed
+          if (commandData.status === 0) {
+            console.log(`✅ Command ${commandId} completed by ESP32`);
+            commandCompleted = true;
+            photoCheckStartTime = now;
+          }
+        }
+
+        // Phase 2: Wait for NEW photo after command completion
+        if (commandCompleted) {
+          // Check photo timeout
+          const photoWaitTime = now - photoCheckStartTime;
+          if (photoWaitTime > PHOTO_TIMEOUT) {
+            throw new Error(`Photo not found for ${commandId} after ${PHOTO_TIMEOUT}ms`);
+          }
+
+          console.log(`📸 Checking for NEW photo (${Math.round(photoWaitTime/1000)}s since completion)...`);
+          
+          const latestPhoto = await getLatestPhotoFromGCS('pakan-ikan1234');
+          
+          if (latestPhoto) {
+            const currentPhotoId = latestPhoto.name || latestPhoto.fileName || latestPhoto.id || 'unknown';
+            
+            // STRICT CHECK: Only accept if this is a NEW photo (different from baseline)
+            if (currentPhotoId !== baselinePhotoId) {
+              console.log(`📸 NEW photo detected: ${currentPhotoId} (baseline was: ${baselinePhotoId})`);
+              
+              // Additional validation: photo should be recent enough
+              const isValidPhoto = this.validatePhotoTimestamp(latestPhoto, commandStartTime, now);
+              if (isValidPhoto.valid) {
+                // Reserve this photo for this command to prevent other requests from taking it
+                this.photoReservations.set(currentPhotoId, commandId);
+                console.log(`📸 Photo reserved for ${commandId}: ${currentPhotoId} (${isValidPhoto.reason})`);
+                return latestPhoto;
+              } else {
+                console.log(`📸 NEW photo rejected due to timing: ${isValidPhoto.reason}`);
+              }
+            } else {
+              console.log(`📸 Same photo as baseline: ${currentPhotoId}, waiting for new upload...`);
+            }
+          } else {
+            console.log(`📸 No photo found in GCS`);
+          }
+        }
+
+      } catch (error) {
+        console.error(`❌ Error monitoring ${commandId}:`, error.message);
+        throw error;
       }
 
       await this.delay(CHECK_INTERVAL);
+    }
+  }
+
+  // Smart photo validation with timezone handling for Indonesia (UTC+7)
+  validatePhotoTimestamp(photo, commandStartTime, currentTime) {
+    try {
+      // Try multiple timestamp properties and formats
+      let photoTime = null;
+      let timestampSource = '';
+      
+      // Try different timestamp properties
+      if (photo.timeCreated) {
+        photoTime = new Date(photo.timeCreated);
+        timestampSource = 'timeCreated';
+      } else if (photo.updated) {
+        photoTime = new Date(photo.updated);
+        timestampSource = 'updated';
+      } else if (photo.created) {
+        photoTime = new Date(photo.created);
+        timestampSource = 'created';
+      } else if (photo.lastModified) {
+        photoTime = new Date(photo.lastModified);
+        timestampSource = 'lastModified';
+      } else {
+        // Fallback: try to extract timestamp from filename
+        const photoId = photo.name || photo.fileName || photo.id || '';
+        const timestampMatch = photoId.match(/photo_(\d+)\.jpg/);
+        if (timestampMatch) {
+          photoTime = new Date(parseInt(timestampMatch[1]));
+          timestampSource = 'filename';
+        }
+      }
+      
+      // Handle invalid timestamps
+      if (!photoTime || isNaN(photoTime.getTime())) {
+        console.log(`📸 Available photo properties:`, Object.keys(photo));
+        return { valid: false, reason: `Invalid photo timestamp from ${timestampSource}` };
+      }
+      
+      const photoTimestamp = photoTime.getTime();
+      const timeDiffFromCommand = photoTimestamp - commandStartTime;
+      const timeDiffFromNow = currentTime - photoTimestamp;
+      
+      // Convert to Indonesia time for logging (UTC+7)
+      const photoTimeWIB = new Date(photoTimestamp + (7 * 60 * 60 * 1000));
+      const commandStartWIB = new Date(commandStartTime + (7 * 60 * 60 * 1000));
+      const currentTimeWIB = new Date(currentTime + (7 * 60 * 60 * 1000));
+      
+      console.log(`📸 Photo validation (${timestampSource}):
+        - Photo time UTC: ${photoTime.toISOString()}
+        - Photo time WIB: ${photoTimeWIB.toISOString()}
+        - Command start UTC: ${new Date(commandStartTime).toISOString()}
+        - Command start WIB: ${commandStartWIB.toISOString()}
+        - Current time UTC: ${new Date(currentTime).toISOString()}
+        - Current time WIB: ${currentTimeWIB.toISOString()}
+        - Diff from command: ${Math.round(timeDiffFromCommand/1000)}s
+        - Diff from now: ${Math.round(timeDiffFromNow/1000)}s`);
+      
+      // Strategy 1: Photo taken after command started (handle timezone differences)
+      // Allow for timezone confusion: -7 hours to +1 hour from command time
+      if (timeDiffFromCommand >= -25200000 && timeDiffFromCommand <= 3600000) { // -7h to +1h from command
+        return { valid: true, reason: `photo taken ${Math.round(timeDiffFromCommand/1000)}s after command - timezone tolerant (${timestampSource})` };
+      }
+      
+      // Strategy 2: Photo is very recent relative to current time (handle timezone issues)
+      // Allow photos that are within 8 hours in either direction (timezone confusion)
+      if (Math.abs(timeDiffFromNow) <= 8 * 60 * 60 * 1000) { // Within 8 hours of current time (either direction)
+        return { valid: true, reason: `recent photo ${Math.round(timeDiffFromNow/1000)}s from now - timezone tolerant (${timestampSource})` };
+      }
+      
+      // Strategy 3: Special case for filename timestamps (these are usually more reliable)
+      if (timestampSource === 'filename') {
+        // For filename timestamps, be more lenient as they're often in local time
+        if (Math.abs(timeDiffFromCommand) <= 10 * 60 * 1000) { // Within 10 minutes of command
+          return { valid: true, reason: `filename timestamp within 10 minutes of command (${timestampSource})` };
+        }
+        
+        // Also check if photo timestamp is "in the future" compared to server time
+        // This often indicates timezone mismatch where device is in WIB but server in UTC
+        if (timeDiffFromNow < 0 && Math.abs(timeDiffFromNow) <= 8 * 60 * 60 * 1000) {
+          return { valid: true, reason: `future photo likely due to timezone diff ${Math.round(timeDiffFromNow/3600000)}h ahead (${timestampSource})` };
+        }
+      }
+      
+      return { 
+        valid: false, 
+        reason: `photo timing invalid: ${Math.round(timeDiffFromCommand/1000)}s from command, ${Math.round(timeDiffFromNow/1000)}s from now (${timestampSource})` 
+      };
+      
+    } catch (error) {
+      console.error("Error validating photo timestamp:", error);
+      return { valid: false, reason: `validation error: ${error.message}` };
     }
   }
 
@@ -428,7 +547,7 @@ async function getLatestPhotoDirectFromGCS() {
     const [buffer] = await latestFile.download();
 
     console.log(`📸 Direct GCS fetch successful: ${latestFile.name}`);
-    return { buffer, fileName: latestFile.name, name: latestFile.name }; // Added 'name' property
+    return { buffer, fileName: latestFile.name };
 
   } catch (error) {
     console.log(`📸 Direct GCS access failed (${error.message}), using fallback...`);
@@ -447,8 +566,7 @@ async function getLatestPhotoWithTimeout() {
       setTimeout(() => reject(new Error('Photo fetch timeout')), PHOTO_FETCH_TIMEOUT)
     );
     
-    // CRITICAL: Skip polling when using as fallback!
-    const photoPromise = getLatestPhotoFromGCS('pakan-ikan1234', true);
+    const photoPromise = getLatestPhotoFromGCS('pakan-ikan1234');
     
     const result = await Promise.race([photoPromise, timeoutPromise]);
     return result;
@@ -478,7 +596,7 @@ setInterval(async () => {
 
 // ============= PUBLIC API =============
 async function triggerCameraAndWait(servoCommand, purpose = "makanan") {
-  console.log(`📨 New camera request: ${servoCommand}, purpose: ${purpose} at ${getCurrentWIB().toISOString().replace('T', ' ').slice(0, 19)} WIB`);
+        console.log(`📨 New camera request: ${servoCommand}, purpose: ${purpose} at ${getCurrentWIB().toISOString().replace('T', ' ').slice(0, 19)} WIB`);
   return await cameraQueue.addRequest(servoCommand, purpose);
 }
 

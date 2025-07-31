@@ -46,33 +46,24 @@ const uploadFishFoodImageToGCS = async (req, res) => {
   }
 };
 
-// FIXED: Fungsi untuk mengambil foto terbaru dari GCS
-async function getLatestPhotoFromGCS(bucketNameOverride, skipPolling = false) {
-  // Skip polling when called from camera queue (ESP32 uploads directly)
-  if (!skipPolling) {
-    while (!isNewPhotoUploaded) {
-      await new Promise(resolve => setTimeout(resolve, 500));
-    }
-    isNewPhotoUploaded = false; // Reset penanda setelah mengambil foto
+// Fungsi untuk mengambil foto terbaru dari GCS
+async function getLatestPhotoFromGCS() {
+  while (!isNewPhotoUploaded) {
+    await new Promise(resolve => setTimeout(resolve, 500));
   }
-  
-  const targetBucket = bucketNameOverride ? storage.bucket(bucketNameOverride) : bucket;
-  const [files] = await targetBucket.getFiles({ prefix: 'photo_' });
-  
+  isNewPhotoUploaded = false; // Reset penanda setelah mengambil foto
+  const [files] = await bucket.getFiles({ prefix: 'photo_' });
   if (!files.length) return null;
-  
   // Urutkan berdasarkan timestamp pada nama file
   files.sort((a, b) => {
     const aTime = parseInt(a.name.match(/\d+/)?.[0] || "0");
     const bTime = parseInt(b.name.match(/\d+/)?.[0] || "0");
     return bTime - aTime;
   });
-  
   const latestFile = files[0];
   const [buffer] = await latestFile.download();
-  return { buffer, fileName: latestFile.name, name: latestFile.name };
+  return { buffer, fileName: latestFile.name };
 }
-
 async function sendUserRequestPhoto(buffer, bot, chatId) {
   // Putar 180 derajat menggunakan sharp
   const rotatedBuffer = await sharp(buffer)
@@ -101,5 +92,4 @@ async function sendUserRequestPhoto(buffer, bot, chatId) {
 
   return publicUrl;
 }
-
 module.exports = { sendUserRequestPhoto, uploadFishFoodImageToGCS, getLatestPhotoFromGCS };
