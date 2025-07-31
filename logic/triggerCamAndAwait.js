@@ -183,7 +183,7 @@ class CameraFeedingQueue {
       await this.delay(3000);
 
       // 4. Ambil foto terbaru - TITIK!
-      const latestPhoto = await getLatestPhotoFromGCS('pakan-ikan123', true);
+      const latestPhoto = await getLatestPhotoFromGCS('pakan-ikan1234', true);
       
       if (!latestPhoto) {
         throw new Error(`No photo available after command ${commandId}`);
