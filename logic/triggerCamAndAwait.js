@@ -191,7 +191,7 @@ class CameraFeedingQueue {
       await this.delay(5000);
 
       // 4. Ambil foto terbaru apapun itu (baru atau lama)
-      const latestPhoto = await getLatestPhotoFromGCS('pakan-ikan123', true); // Skip polling!
+      const latestPhoto = await getLatestPhotoFromGCS('pakan-ikan1234', true); // Skip polling!
       
       if (!latestPhoto) {
         throw new Error(`No photo available after command ${commandId}`);
@@ -448,7 +448,7 @@ async function getLatestPhotoWithTimeout() {
     );
     
     // CRITICAL: Skip polling when using as fallback!
-    const photoPromise = getLatestPhotoFromGCS('pakan-ikan123', true);
+    const photoPromise = getLatestPhotoFromGCS('pakan-ikan1234', true);
     
     const result = await Promise.race([photoPromise, timeoutPromise]);
     return result;
