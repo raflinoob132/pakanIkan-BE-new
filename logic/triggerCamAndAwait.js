@@ -212,7 +212,7 @@ class CameraFeedingQueue {
 
   // Tunggu ESP32 selesai
 async waitForESP32CompletionOnly(commandId) {
-  const COMMAND_TIMEOUT = 30000; // 30 seconds
+  const COMMAND_TIMEOUT = 50000; // 30 seconds
   const CHECK_INTERVAL = 1000;   // 1 second
   const startTime = Date.now();
 
