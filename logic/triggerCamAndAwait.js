@@ -1,5 +1,4 @@
 
-v1
 const { db } = require("../config/firebase");
 const { getLatestPhotoFromGCS } = require("./uploadFishFood");
 
