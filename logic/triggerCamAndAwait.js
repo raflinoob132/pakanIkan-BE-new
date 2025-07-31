@@ -161,10 +161,10 @@ class CameraFeedingQueue {
 
   // SIMPLIFIED: executeRequest tanpa baseline ribet
   async executeRequest(request) {
-    const commandId = request.id + `-attempt${request.attempts + 1}`;
+    const commandId = request.id + `-${Date.now()}`; // Always unique per execution
     
     try {
-      console.log(`📤 Sending command ${commandId}: ${request.servoCommand}`);
+      console.log(`📤 Sending command ${commandId}: ${request.servoCommand} (attempt ${request.attempts + 1})`);
 
       // 1. Kirim perintah
       await db.ref("checkCameraMoveCommand").set({
