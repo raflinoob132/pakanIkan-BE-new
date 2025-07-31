@@ -63,7 +63,7 @@ class CameraFeedingQueue {
       try {
         // Check if request is too old (older than 10 minutes)
         const requestAge = Date.now() - request.createdAt;
-        if (requestAge > 10 * 60 * 1000) {
+        if (requestAge > 18 * 60 * 1000) {
           throw new Error(`Request expired: ${Math.round(requestAge / 60000)} minutes old`);
         }
 
@@ -109,7 +109,7 @@ class CameraFeedingQueue {
           this.queue.unshift(request);
             
           // Wait before retry
-          await this.delay(10000);
+          await this.delay(15000);
           continue;
         }
         
@@ -122,7 +122,7 @@ class CameraFeedingQueue {
       this.currentRequestId = null;
       
       // Delay antar request untuk mencegah overload
-      await this.delay(8000);
+      await this.delay(20000);
     }
     
     this.processing = false;
