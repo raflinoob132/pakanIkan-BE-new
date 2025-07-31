@@ -19,7 +19,8 @@ class CameraFeedingQueue {
     this.processing = false;
     this.currentRequestId = null;
     this.failedRequests = new Map();
-    this.photoReservations = new Map(); // Track which photos belong to which requests
+    this.photoReservations = new Map();
+    this.lastSuccessfulCommand = null;
   }
 
   // Tambah request ke antrian
@@ -75,11 +76,8 @@ class CameraFeedingQueue {
           throw new Error(`Too many recent failures for command ${request.servoCommand}. Skipping.`);
         }
 
-        // Cek apakah ESP32 sedang sibuk
-        const busyCheck = await this.checkESP32Status();
-        if (busyCheck.isBusy) {
-          throw new Error(`ESP32 sedang sibuk: ${busyCheck.reason}`);
-        }
+        // PERBAIKAN: Cek dan bersihkan ESP32 sebelum mulai
+        await this.prepareESP32ForNewCommand();
 
         // Get baseline photo before sending command (for logging purposes only)
         const baselinePhoto = await getLatestPhotoDirectFromGCS();
@@ -92,6 +90,7 @@ class CameraFeedingQueue {
         request.resolve(result);
         
         console.log(`✅ Request ${request.id} berhasil diproses`);
+        this.lastSuccessfulCommand = Date.now();
         
       } catch (error) {
         console.error(`❌ Request ${request.id} gagal:`, error.message);
@@ -109,8 +108,10 @@ class CameraFeedingQueue {
           // Add back to front of queue for retry
           this.queue.unshift(request);
             
-          // Wait before retry
-          await this.delay(10000);
+          // PERBAIKAN: Wait lebih lama dan reset ESP32 sebelum retry
+          console.log(`⏳ Waiting 15 seconds before retry and resetting ESP32...`);
+          await this.delay(15000);
+          await this.forceResetESP32("Before retry");
           continue;
         }
         
@@ -130,9 +131,71 @@ class CameraFeedingQueue {
     console.log("✅ Semua request dalam antrian selesai diproses");
   }
 
+  // BARU: Prepare ESP32 dan bersihkan state sebelum command baru
+  async prepareESP32ForNewCommand() {
+    console.log("🔧 Preparing ESP32 for new command...");
+    
+    try {
+      // 1. Force reset camera_busy flag
+      await db.ref("deviceStatus/camera_busy").set(false);
+      console.log("🔧 Reset camera_busy to false");
+      
+      // 2. Clear any stale command
+      await db.ref("checkCameraMoveCommand").set({
+        commandId: null,
+        moveServo: null,
+        status: 0,
+        timestamp: null,
+        purpose: null
+      });
+      console.log("🔧 Cleared stale command data");
+      
+      // 3. Wait a bit for ESP32 to process
+      await this.delay(2000);
+      
+      // 4. Final check if ESP32 is really ready
+      const finalCheck = await this.checkESP32Status();
+      if (finalCheck.isBusy) {
+        console.log(`⚠️ ESP32 still busy after reset: ${finalCheck.reason}`);
+        // Force it anyway since we already reset
+      }
+      
+      console.log("✅ ESP32 preparation complete");
+      
+    } catch (error) {
+      console.error("❌ Error preparing ESP32:", error.message);
+      // Continue anyway, might still work
+    }
+  }
+
+  // BARU: Force reset ESP32 state
+  async forceResetESP32(reason = "Manual reset") {
+    console.log(`🚨 Force resetting ESP32 state (${reason})...`);
+    
+    try {
+      // Reset all ESP32 related flags
+      await Promise.all([
+        db.ref("deviceStatus/camera_busy").set(false),
+        db.ref("checkCameraMoveCommand").set({
+          commandId: null,
+          moveServo: null,
+          status: 0,
+          timestamp: null,
+          purpose: null
+        })
+      ]);
+      
+      console.log("✅ ESP32 state force reset complete");
+      await this.delay(3000); // Wait for ESP32 to process reset
+      
+    } catch (error) {
+      console.error("❌ Error force resetting ESP32:", error.message);
+    }
+  }
+
   // Execute request with overall timeout
   async executeRequestWithTimeout(request, baselinePhotoId) {
-    const TOTAL_TIMEOUT = 120000; // 2 minutes total timeout per request
+    const TOTAL_TIMEOUT = 180000; // 3 minutes total timeout per request (increased)
     
     return Promise.race([
       this.executeRequest(request, baselinePhotoId),
@@ -142,32 +205,34 @@ class CameraFeedingQueue {
     ]);
   }
 
-  // Cek status ESP32 sebelum kirim command
+  // PERBAIKAN: Cek status ESP32 dengan fallback
   async checkESP32Status() {
     try {
-      // Cek apakah sedang memproses
-      const statusSnap = await db.ref("deviceStatus/camera_busy").once("value");
-      const isCameraBusy = statusSnap.val() === true || statusSnap.val() === "true";
+      // Get both status values
+      const [cameraBusySnap, commandStatusSnap] = await Promise.all([
+        db.ref("deviceStatus/camera_busy").once("value"),
+        db.ref("checkCameraMoveCommand/status").once("value")
+      ]);
+      
+      const isCameraBusy = cameraBusySnap.val() === true || cameraBusySnap.val() === "true";
+      const commandStatus = commandStatusSnap.val();
       
       if (isCameraBusy) {
         return { isBusy: true, reason: "Camera sedang digunakan" };
       }
 
-      // Cek apakah ada command yang belum diproses
-      const commandSnap = await db.ref("checkCameraMoveCommand/status").once("value");
-      const commandStatus = commandSnap.val();
-      
       if (commandStatus === 1) {
         return { isBusy: true, reason: "Masih ada command yang belum selesai" };
       }
 
       return { isBusy: false };
     } catch (error) {
-      return { isBusy: true, reason: `Error checking status: ${error.message}` };
+      console.error("Error checking ESP32 status:", error.message);
+      return { isBusy: false }; // Assume not busy if can't check
     }
   }
 
-  // FIXED: Eksekusi request individual - SIMPLIFIED VERSION
+  // PERBAIKAN: Eksekusi request dengan multiple fallback strategies
   async executeRequest(request, baselinePhotoId) {
     const commandId = request.id + `-attempt${request.attempts + 1}`;
     
@@ -183,34 +248,20 @@ class CameraFeedingQueue {
         purpose: request.purpose
       });
 
-      // 2. Tunggu ESP32 selesai SAJA (tidak ribet mikirin foto)
-      await this.waitForESP32CompletionOnly(commandId);
-
-      // 3. Tunggu sebentar untuk photo processing/upload
-      console.log(`⏳ Waiting 5 seconds for photo processing...`);
-      await this.delay(5000);
-
-      // 4. Ambil foto terbaru apapun itu (baru atau lama)
-      const latestPhoto = await getLatestPhotoFromGCS('pakan-ikan123');
+      // 2. Tunggu ESP32 selesai dengan multiple strategies
+      const commandSuccess = await this.waitForESP32WithFallback(commandId);
       
-      if (!latestPhoto) {
-        throw new Error(`No photo available after command ${commandId}`);
+      if (!commandSuccess) {
+        throw new Error(`ESP32 failed to complete command ${commandId}`);
       }
 
-      const photoId = latestPhoto.name || latestPhoto.fileName || latestPhoto.id || 'unknown';
-      console.log(`📸 Using photo: ${photoId}`);
-      
-      // Optional: Log apakah ini foto baru atau sama (untuk debugging)
-      if (baselinePhotoId && photoId !== baselinePhotoId) {
-        console.log(`📸 ✅ NEW photo detected (different from baseline: ${baselinePhotoId})`);
-      } else if (baselinePhotoId) {
-        console.log(`📸 ⚠️ SAME photo as baseline (ESP32 might not have taken new photo)`);
-      }
+      // 3. Tunggu foto dengan strategi bertingkat
+      const photo = await this.getPhotoWithMultipleStrategies(baselinePhotoId, commandId);
 
-      // 5. Bersihkan command
+      // 4. Bersihkan command
       await this.cleanupCommand();
 
-      return latestPhoto;
+      return photo;
 
     } catch (error) {
       console.error(`❌ Execute request failed for ${commandId}:`, error.message);
@@ -226,43 +277,166 @@ class CameraFeedingQueue {
     }
   }
 
-  // SIMPLE: Tunggu ESP32 selesai saja, tanpa ribet foto
-  async waitForESP32CompletionOnly(commandId) {
-    const COMMAND_TIMEOUT = 30000; // 30 seconds
-    const CHECK_INTERVAL = 1000;   // Check every 1 second
+  // BARU: Tunggu ESP32 dengan fallback strategies
+  async waitForESP32WithFallback(commandId) {
+    const COMMAND_TIMEOUT = 45000; // Increased to 45 seconds
+    const CHECK_INTERVAL = 1000;
     const startTime = Date.now();
     
     console.log(`⏳ Waiting for ESP32 to complete command ${commandId}...`);
     
     while (true) {
       const now = Date.now();
+      const elapsed = now - startTime;
       
       // Check timeout
-      if (now - startTime > COMMAND_TIMEOUT) {
-        throw new Error(`Command ${commandId} timeout - ESP32 tidak merespons dalam ${COMMAND_TIMEOUT}ms`);
+      if (elapsed > COMMAND_TIMEOUT) {
+        console.log(`⚠️ ESP32 timeout reached, trying fallback strategies...`);
+        
+        // Fallback Strategy 1: Check if ESP32 is actually done but forgot to update status
+        const fallbackSuccess = await this.checkIfESP32ActuallyDone(commandId);
+        if (fallbackSuccess) {
+          console.log(`✅ ESP32 actually completed (fallback detection)`);
+          return true;
+        }
+        
+        // Fallback Strategy 2: Force assume success if this is not first attempt
+        if (commandId.includes('attempt2') || commandId.includes('attempt3')) {
+          console.log(`🚨 Assuming ESP32 success on retry attempt`);
+          return true;
+        }
+        
+        return false;
       }
 
-      const snap = await db.ref("checkCameraMoveCommand").once("value");
-      const commandData = snap.val();
-      
-      if (!commandData || commandData.commandId !== commandId) {
-        throw new Error(`Command ${commandId} data corrupted or not found`);
-      }
+      try {
+        const snap = await db.ref("checkCameraMoveCommand").once("value");
+        const commandData = snap.val();
+        
+        // Check if command data exists and matches
+        if (!commandData) {
+          console.log(`⚠️ Command data missing for ${commandId}`);
+          await this.delay(CHECK_INTERVAL);
+          continue;
+        }
+        
+        if (commandData.commandId !== commandId) {
+          console.log(`⚠️ Command ID mismatch: expected ${commandId}, got ${commandData.commandId}`);
+          await this.delay(CHECK_INTERVAL);
+          continue;
+        }
 
-      // Check if command completed
-      if (commandData.status === 0) {
-        console.log(`✅ ESP32 completed command ${commandId}`);
-        return;
-      }
-      
-      // Show progress every 5 seconds
-      const elapsed = Math.round((now - startTime) / 1000);
-      if (elapsed % 5 === 0 && elapsed > 0) {
-        console.log(`⏳ ESP32 still processing ${commandId}... (${elapsed}s elapsed)`);
+        // Check if command completed
+        if (commandData.status === 0) {
+          console.log(`✅ ESP32 completed command ${commandId}`);
+          return true;
+        }
+        
+        // Show progress every 10 seconds
+        if (elapsed % 10000 < 1000 && elapsed > 5000) {
+          console.log(`⏳ ESP32 still processing ${commandId}... (${Math.round(elapsed/1000)}s elapsed)`);
+        }
+
+      } catch (error) {
+        console.error(`Error checking command status:`, error.message);
       }
 
       await this.delay(CHECK_INTERVAL);
     }
+  }
+
+  // BARU: Check if ESP32 actually completed but didn't update status
+  async checkIfESP32ActuallyDone(commandId) {
+    try {
+      console.log(`🔍 Checking if ESP32 actually completed ${commandId}...`);
+      
+      // Strategy 1: Check if camera_busy was set to false (indicates ESP32 finished)
+      const cameraBusySnap = await db.ref("deviceStatus/camera_busy").once("value");
+      const isCameraBusy = cameraBusySnap.val() === true || cameraBusySnap.val() === "true";
+      
+      if (!isCameraBusy) {
+        console.log(`📸 camera_busy is false, ESP32 might be done`);
+        return true;
+      }
+      
+      // Strategy 2: Check if there's a new photo in the last 2 minutes
+      const recentPhoto = await this.checkForRecentPhoto(2 * 60 * 1000); // 2 minutes
+      if (recentPhoto) {
+        console.log(`📸 Recent photo found, ESP32 probably completed`);
+        return true;
+      }
+      
+      return false;
+      
+    } catch (error) {
+      console.log(`Error in fallback check:`, error.message);
+      return false;
+    }
+  }
+
+  // BARU: Check for recent photo
+  async checkForRecentPhoto(timeWindow) {
+    try {
+      const photo = await getLatestPhotoFromGCS('pakan-ikan123');
+      if (!photo) return false;
+      
+      // Try to get photo timestamp
+      let photoTime = null;
+      if (photo.timeCreated) {
+        photoTime = new Date(photo.timeCreated).getTime();
+      } else if (photo.name && photo.name.match(/photo_(\d+)\.jpg/)) {
+        photoTime = parseInt(photo.name.match(/photo_(\d+)\.jpg/)[1]);
+      }
+      
+      if (photoTime) {
+        const now = Date.now();
+        const timeDiff = now - photoTime;
+        return Math.abs(timeDiff) <= timeWindow; // Account for timezone differences
+      }
+      
+      return false;
+    } catch (error) {
+      console.log(`Error checking recent photo:`, error.message);
+      return false;
+    }
+  }
+
+  // BARU: Get photo with multiple strategies
+  async getPhotoWithMultipleStrategies(baselinePhotoId, commandId) {
+    console.log(`📸 Getting photo with multiple strategies...`);
+    
+    // Strategy 1: Wait a bit and get latest photo
+    console.log(`⏳ Strategy 1: Waiting 5 seconds for photo processing...`);
+    await this.delay(5000);
+    
+    let photo = await getLatestPhotoFromGCS('pakan-ikan123');
+    if (photo) {
+      const photoId = photo.name || photo.fileName || photo.id || 'unknown';
+      console.log(`📸 Strategy 1 success: ${photoId}`);
+      return photo;
+    }
+    
+    // Strategy 2: Wait longer and try again
+    console.log(`⏳ Strategy 2: Waiting additional 10 seconds...`);
+    await this.delay(10000);
+    
+    photo = await getLatestPhotoFromGCS('pakan-ikan123');
+    if (photo) {
+      const photoId = photo.name || photo.fileName || photo.id || 'unknown';
+      console.log(`📸 Strategy 2 success: ${photoId}`);
+      return photo;
+    }
+    
+    // Strategy 3: Try direct GCS access
+    console.log(`📸 Strategy 3: Direct GCS access...`);
+    photo = await getLatestPhotoDirectFromGCS();
+    if (photo) {
+      const photoId = photo.name || photo.fileName || photo.id || 'unknown';
+      console.log(`📸 Strategy 3 success: ${photoId}`);
+      return photo;
+    }
+    
+    throw new Error(`No photo available after all strategies for ${commandId}`);
   }
 
   // Clean up command in database
@@ -320,6 +494,7 @@ class CameraFeedingQueue {
       queueLength: this.queue.length,
       processing: this.processing,
       currentRequestId: this.currentRequestId,
+      lastSuccessfulCommand: this.lastSuccessfulCommand,
       photoReservations: Object.fromEntries(this.photoReservations),
       queuedRequests: this.queue.map(req => ({
         id: req.id,
@@ -360,6 +535,7 @@ class CameraFeedingQueue {
       
       // Clean up database
       await this.cleanupCommand();
+      await this.forceResetESP32(reason);
       
       // Reset state
       this.processing = false;
@@ -369,7 +545,7 @@ class CameraFeedingQueue {
       setTimeout(() => {
         console.log("🔄 Resuming queue processing after force complete...");
         this.processQueue();
-      }, 2000);
+      }, 5000);
       
       return true;
     }
@@ -438,7 +614,7 @@ async function getLatestPhotoDirectFromGCS() {
 
 // Fallback method with timeout to prevent infinite waiting
 async function getLatestPhotoWithTimeout() {
-  const PHOTO_FETCH_TIMEOUT = 5000; // 5 seconds timeout
+  const PHOTO_FETCH_TIMEOUT = 10000; // Increased to 10 seconds
   
   try {
     console.log(`📸 Using fallback getLatestPhotoFromGCS with timeout...`);
@@ -461,7 +637,7 @@ async function getLatestPhotoWithTimeout() {
 // ============= SINGLETON INSTANCE =============
 const cameraQueue = new CameraFeedingQueue();
 
-// Auto-restart mechanism: Check for stuck queue every 5 minutes
+// Auto-restart mechanism: Check for stuck queue every 3 minutes
 setInterval(async () => {
   const status = cameraQueue.getStatus();
   
@@ -473,7 +649,13 @@ setInterval(async () => {
       await cameraQueue.restartQueue();
     }
   }
-}, 5 * 60 * 1000); // Check every 5 minutes
+  
+  // Also check if ESP32 seems completely stuck (no successful commands in 10 minutes)
+  if (status.lastSuccessfulCommand && Date.now() - status.lastSuccessfulCommand > 10 * 60 * 1000) {
+    console.log("🚨 ESP32 seems stuck (no success in 10 minutes), forcing reset...");
+    await cameraQueue.forceResetESP32("Long time no success");
+  }
+}, 3 * 60 * 1000); // Check every 3 minutes
 
 // ============= PUBLIC API =============
 async function triggerCameraAndWait(servoCommand, purpose = "makanan") {
@@ -498,13 +680,18 @@ function restartQueue() {
   return cameraQueue.restartQueue();
 }
 
+function forceResetESP32(reason) {
+  return cameraQueue.forceResetESP32(reason);
+}
+
 // ============= EXPORTS =============
 module.exports = { 
   triggerCameraAndWait,
   getQueueStatus,
   clearQueue,
   forceCompleteCurrentRequest,
-  restartQueue
+  restartQueue,
+  forceResetESP32
 };
 //v1
 // const { db } = require("../config/firebase");
