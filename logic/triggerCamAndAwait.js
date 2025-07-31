@@ -256,7 +256,7 @@ class CameraFeedingQueue {
 
           console.log(`📸 Checking for NEW photo (${Math.round(photoWaitTime/1000)}s since completion)...`);
           
-          const latestPhoto = await getLatestPhotoFromGCS('pakan-ikan123');
+          const latestPhoto = await getLatestPhotoFromGCS('pakan-ikan1234');
           
           if (latestPhoto) {
             const currentPhotoId = latestPhoto.name || latestPhoto.fileName || latestPhoto.id || 'unknown';
@@ -565,9 +565,9 @@ async function getLatestPhotoWithTimeout() {
     const timeoutPromise = new Promise((_, reject) => 
       setTimeout(() => reject(new Error('Photo fetch timeout')), PHOTO_FETCH_TIMEOUT)
     );
-    
-    const photoPromise = getLatestPhotoFromGCS('pakan-ikan123');
-    
+
+    const photoPromise = getLatestPhotoFromGCS('pakan-ikan1234');
+
     const result = await Promise.race([photoPromise, timeoutPromise]);
     return result;
     
