@@ -179,19 +179,40 @@ class CameraFeedingQueue {
       await this.waitForESP32CompletionOnly(commandId);
 
       // 3. Tunggu sebentar buat upload
-      console.log(`⏳ Waiting 3 seconds for photo upload...`);
-      await this.delay(3000);
+      console.log(`⏳ Waiting 5 seconds for photo upload...`);
+      await this.delay(5000); // Naikin jadi 5 detik
 
-      // 4. Ambil foto terbaru - TITIK!
+      // 4. Ambil foto terbaru dengan debugging
+      console.log(`📸 Fetching latest photo from bucket...`);
       const latestPhoto = await getLatestPhotoFromGCS('pakan-ikan1234', true);
       
       if (!latestPhoto) {
         throw new Error(`No photo available after command ${commandId}`);
       }
 
-      console.log(`📸 Got photo: ${latestPhoto.name || latestPhoto.fileName}`);
+      const photoTimestamp = latestPhoto.name ? latestPhoto.name.match(/\d+/)?.[0] : null;
+      const photoTime = photoTimestamp ? new Date(parseInt(photoTimestamp)) : null;
       
-      // 5. Bersihkan command
+      console.log(`📸 Got photo: ${latestPhoto.name || latestPhoto.fileName}`);
+      console.log(`📸 Photo timestamp: ${photoTime ? photoTime.toISOString() : 'unknown'}`);
+      console.log(`📸 Command started at: ${new Date(request.timestamp).toISOString()}`);
+      
+      // Check if photo is newer than command
+      if (photoTimestamp && parseInt(photoTimestamp) < request.timestamp) {
+        console.log(`⚠️ WARNING: Photo seems older than command! Possible issue.`);
+      }
+      
+      // 5. Upload foto ke Telegram (jangan lupa!)
+      try {
+        const { sendTelegramImage } = require('../telegram/telegramUtils');
+        await sendTelegramImage(latestPhoto.buffer, `Camera command executed: ${request.servoCommand}`);
+        console.log(`📱 Photo sent to Telegram successfully`);
+      } catch (telegramError) {
+        console.error(`📱 Failed to send to Telegram:`, telegramError.message);
+        // Don't fail the whole request just because Telegram failed
+      }
+      
+      // 6. Bersihkan command
       await this.cleanupCommand();
 
       return latestPhoto;
@@ -211,47 +232,43 @@ class CameraFeedingQueue {
   }
 
   // Tunggu ESP32 selesai
-async waitForESP32CompletionOnly(commandId) {
-  const COMMAND_TIMEOUT = 50000; // 30 seconds
-  const CHECK_INTERVAL = 1000;   // 1 second
-  const startTime = Date.now();
+  async waitForESP32CompletionOnly(commandId) {
+    const COMMAND_TIMEOUT = 30000; // 30 seconds
+    const CHECK_INTERVAL = 1000;   // Check every 1 second
+    const startTime = Date.now();
+    
+    console.log(`⏳ Waiting for ESP32 to complete command ${commandId}...`);
+    
+    while (true) {
+      const now = Date.now();
+      
+      // Check timeout
+      if (now - startTime > COMMAND_TIMEOUT) {
+        throw new Error(`Command ${commandId} timeout - ESP32 tidak merespons dalam ${COMMAND_TIMEOUT}ms`);
+      }
 
-  console.log(`⏳ Waiting for ESP32 to complete command ${commandId}...`);
+      const snap = await db.ref("checkCameraMoveCommand").once("value");
+      const commandData = snap.val();
+      
+      if (!commandData || commandData.commandId !== commandId) {
+        throw new Error(`Command ${commandId} data corrupted or not found`);
+      }
 
-  while (true) {
-    const now = Date.now();
+      // Check if command completed
+      if (commandData.status === 0) {
+        console.log(`✅ ESP32 completed command ${commandId}`);
+        return;
+      }
+      
+      // Show progress every 5 seconds
+      const elapsed = Math.round((now - startTime) / 1000);
+      if (elapsed % 5 === 0 && elapsed > 0) {
+        console.log(`⏳ ESP32 still processing ${commandId}... (${elapsed}s elapsed)`);
+      }
 
-    // Timeout protection
-    if (now - startTime > COMMAND_TIMEOUT) {
-      throw new Error(`Command ${commandId} timeout - ESP32 tidak merespons dalam ${COMMAND_TIMEOUT}ms`);
+      await this.delay(CHECK_INTERVAL);
     }
-
-    // Ambil status saja
-    const statusSnap = await db.ref("checkCameraMoveCommand/status").once("value");
-    const status = statusSnap.val();
-
-    // Ambil commandId juga untuk validasi (opsional, tapi aman)
-    const idSnap = await db.ref("checkCameraMoveCommand/commandId").once("value");
-    const currentId = idSnap.val();
-
-    if (currentId !== commandId) {
-      throw new Error(`Command ${commandId} data corrupted or not found (currentId: ${currentId})`);
-    }
-
-    if (status === 0) {
-      console.log(`✅ ESP32 completed command ${commandId}`);
-      return;
-    }
-
-    // Progress log tiap 5 detik
-    const elapsed = Math.round((now - startTime) / 1000);
-    if (elapsed % 5 === 0 && elapsed > 0) {
-      console.log(`⏳ ESP32 still processing ${commandId}... (${elapsed}s elapsed)`);
-    }
-
-    await this.delay(CHECK_INTERVAL);
   }
-}
 
   // Clean up command in database
   async cleanupCommand() {
