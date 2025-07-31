@@ -184,7 +184,7 @@ class CameraFeedingQueue {
 
       // 4. Ambil foto terbaru dengan debugging
       console.log(`📸 Fetching latest photo from bucket...`);
-      const latestPhoto = await getLatestPhotoFromGCS('pakan-ikan1234', true);
+      const latestPhoto = await getLatestPhotoFromGCS('pakan-ikan1234');
       
       if (!latestPhoto) {
         throw new Error(`No photo available after command ${commandId}`);
