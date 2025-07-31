@@ -243,7 +243,7 @@ class CameraFeedingQueue {
 
           console.log(`📸 Checking for photo (${Math.round(photoWaitTime/1000)}s since completion)...`);
           
-          const latestPhoto = await getLatestPhotoFromGCS('pakan-ikan123');
+          const latestPhoto = await getLatestPhotoFromGCS('pakan-ikan1234');
           
           if (latestPhoto) {
             // Debug: Log photo object structure
@@ -367,7 +367,7 @@ class CameraFeedingQueue {
   async findRecentPhoto(commandStartTime) {
     try {
       console.log(`🔍 Searching for any recent photo since command started...`);
-      const photo = await getLatestPhotoFromGCS('pakan-ikan123');
+      const photo = await getLatestPhotoFromGCS('pakan-ikan1234');
       
       if (photo) {
         const photoId = photo.name || photo.fileName || photo.id || 'unknown';
