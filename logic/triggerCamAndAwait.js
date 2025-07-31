@@ -202,7 +202,17 @@ class CameraFeedingQueue {
         console.log(`⚠️ WARNING: Photo seems older than command! Possible issue.`);
       }
       
-      // 5. Bersihkan command
+      // 5. Upload foto ke Telegram (jangan lupa!)
+      try {
+        const { sendTelegramImage } = require('../telegram/telegramUtils');
+        await sendTelegramImage(latestPhoto.buffer, `Camera command executed: ${request.servoCommand}`);
+        console.log(`📱 Photo sent to Telegram successfully`);
+      } catch (telegramError) {
+        console.error(`📱 Failed to send to Telegram:`, telegramError.message);
+        // Don't fail the whole request just because Telegram failed
+      }
+      
+      // 6. Bersihkan command
       await this.cleanupCommand();
 
       return latestPhoto;
