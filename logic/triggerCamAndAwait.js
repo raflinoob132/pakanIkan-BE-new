@@ -211,43 +211,47 @@ class CameraFeedingQueue {
   }
 
   // Tunggu ESP32 selesai
-  async waitForESP32CompletionOnly(commandId) {
-    const COMMAND_TIMEOUT = 30000; // 30 seconds
-    const CHECK_INTERVAL = 1000;   // Check every 1 second
-    const startTime = Date.now();
-    
-    console.log(`⏳ Waiting for ESP32 to complete command ${commandId}...`);
-    
-    while (true) {
-      const now = Date.now();
-      
-      // Check timeout
-      if (now - startTime > COMMAND_TIMEOUT) {
-        throw new Error(`Command ${commandId} timeout - ESP32 tidak merespons dalam ${COMMAND_TIMEOUT}ms`);
-      }
+async waitForESP32CompletionOnly(commandId) {
+  const COMMAND_TIMEOUT = 30000; // 30 seconds
+  const CHECK_INTERVAL = 1000;   // 1 second
+  const startTime = Date.now();
 
-      const snap = await db.ref("checkCameraMoveCommand").once("value");
-      const commandData = snap.val();
-      
-      if (!commandData || commandData.commandId !== commandId) {
-        throw new Error(`Command ${commandId} data corrupted or not found`);
-      }
+  console.log(`⏳ Waiting for ESP32 to complete command ${commandId}...`);
 
-      // Check if command completed
-      if (commandData.status === 0) {
-        console.log(`✅ ESP32 completed command ${commandId}`);
-        return;
-      }
-      
-      // Show progress every 5 seconds
-      const elapsed = Math.round((now - startTime) / 1000);
-      if (elapsed % 5 === 0 && elapsed > 0) {
-        console.log(`⏳ ESP32 still processing ${commandId}... (${elapsed}s elapsed)`);
-      }
+  while (true) {
+    const now = Date.now();
 
-      await this.delay(CHECK_INTERVAL);
+    // Timeout protection
+    if (now - startTime > COMMAND_TIMEOUT) {
+      throw new Error(`Command ${commandId} timeout - ESP32 tidak merespons dalam ${COMMAND_TIMEOUT}ms`);
     }
+
+    // Ambil status saja
+    const statusSnap = await db.ref("checkCameraMoveCommand/status").once("value");
+    const status = statusSnap.val();
+
+    // Ambil commandId juga untuk validasi (opsional, tapi aman)
+    const idSnap = await db.ref("checkCameraMoveCommand/commandId").once("value");
+    const currentId = idSnap.val();
+
+    if (currentId !== commandId) {
+      throw new Error(`Command ${commandId} data corrupted or not found (currentId: ${currentId})`);
+    }
+
+    if (status === 0) {
+      console.log(`✅ ESP32 completed command ${commandId}`);
+      return;
+    }
+
+    // Progress log tiap 5 detik
+    const elapsed = Math.round((now - startTime) / 1000);
+    if (elapsed % 5 === 0 && elapsed > 0) {
+      console.log(`⏳ ESP32 still processing ${commandId}... (${elapsed}s elapsed)`);
+    }
+
+    await this.delay(CHECK_INTERVAL);
   }
+}
 
   // Clean up command in database
   async cleanupCommand() {
