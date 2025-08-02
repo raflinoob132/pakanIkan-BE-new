@@ -283,7 +283,7 @@ class CameraFeedingQueue {
 
   // Execute single request with timeout
   async executeRequest(request, baselinePhotoId) {
-    const commandId = request.id + `-attempt${request.attempts + 1}`;
+    const commandId = request.id + `a${request.attempts + 1}`;
     const timeout = 180000; // 3 minutes total timeout
     
     console.log(`🚀 Executing ${request.kolam} command ${commandId}`);
