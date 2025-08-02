@@ -153,11 +153,11 @@ class CameraFeedingQueue {
   async getBaselineForKolam(kolam) {
     try {
       // Strategy 1: Use last successful photo from this kolam
-      if (this.lastPhotoPerKolam.has(kolam)) {
-        const lastPhoto = this.lastPhotoPerKolam.get(kolam);
-        console.log(`📸 Using last successful photo for ${kolam}: ${lastPhoto}`);
-        return lastPhoto;
-      }
+      // if (this.lastPhotoPerKolam.has(kolam)) {
+      //   const lastPhoto = this.lastPhotoPerKolam.get(kolam);
+      //   console.log(`📸 Using last successful photo for ${kolam}: ${lastPhoto}`);
+      //   return lastPhoto;
+      // }
 
       // Strategy 2: Get current latest photo and claim it for this kolam
       const currentLatest = await this.getLatestPhotoSafely();
