@@ -28,7 +28,7 @@ function startEsp32StatusMonitor() {
     } catch (err) {
       console.error("Gagal cek status ESP32:", err);
     }
-  }, 1200000); // setiap 30 detik
+  }, 10000); // setiap 10 detik
 }
 
 module.exports = { startEsp32StatusMonitor, setEsp32NotifStatus, getEsp32NotifStatus };
