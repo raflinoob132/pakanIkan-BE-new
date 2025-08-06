@@ -14,6 +14,7 @@ function getEsp32NotifStatus() {
 
 function startEsp32StatusMonitor() {
   let lastNotifTime = 0;
+  let wasDown = false; // Tambahan: status sebelumnya
 
   setInterval(async () => {
     try {
@@ -21,14 +22,23 @@ function startEsp32StatusMonitor() {
       const lastSeenNow = snapshot.val();
 
       // Cek setiap menit
-      if (lastSeenPrev !== null && lastSeenNow === lastSeenPrev && notifEsp32Down) {
-        const now = Date.now();
-        // Kirim notifikasi maksimal 1x setiap 30 menit
-        if (now - lastNotifTime > 30 * 60 * 1000) {
-          await sendTelegramMessage(
-            "⚠️ ESP32 kemungkinan down! Nilai esp32_last_seen tidak berubah.\n\nKetik /espnotif off untuk mematikan notifikasi ini."
-          );
-          lastNotifTime = now;
+      if (lastSeenPrev !== null && notifEsp32Down) {
+        if (lastSeenNow === lastSeenPrev) {
+          // ESP32 kemungkinan down
+          const now = Date.now();
+          if (now - lastNotifTime > 30 * 60 * 1000) {
+            await sendTelegramMessage(
+              "⚠️ ESP32 kemungkinan down! Nilai esp32_last_seen tidak berubah.\n\nKetik /espnotif off untuk mematikan notifikasi ini."
+            );
+            lastNotifTime = now;
+          }
+          wasDown = true;
+        } else {
+          // ESP32 reconnect (ada perubahan setelah sebelumnya down)
+          if (wasDown) {
+            await sendTelegramMessage("✅ ESP32 sudah nyala kembali dan terhubung ke server.");
+            wasDown = false;
+          }
         }
       }
 
