@@ -38,6 +38,7 @@ function startEsp32StatusMonitor() {
           if (wasDown) {
             await sendTelegramMessage("✅ ESP32 sudah nyala kembali dan terhubung ke server.");
             wasDown = false;
+            lastNotifTime = 0; // Reset agar notifikasi down berikutnya tidak tertunda
           }
         }
       }
