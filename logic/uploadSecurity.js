@@ -1,20 +1,49 @@
 const sharp = require('sharp');
+const { addPhotoSize, getPhotoStats, transactionTypes } = require('./photoCounter');
 
-// Pastikan bot dan chatId di-import atau di-passing ke fungsi ini
-
-// Fungsi murni untuk kirim foto ke Telegram
 async function sendSecurityPhotoToTelegram(buffer, bot, chatId) {
+  // Track original buffer size
+  addPhotoSize(buffer.length, transactionTypes.SECURITY_PHOTO);
+  
   // Putar 180 derajat menggunakan sharp
   const rotatedBuffer = await sharp(buffer)
     .rotate(180)
     .jpeg({ quality: 80 })
     .toBuffer();
 
+  // Track processed buffer size
+  addPhotoSize(rotatedBuffer.length, transactionTypes.TELEGRAM_SEND);
+
   // Kirim ke Telegram
   await bot.sendPhoto(chatId, rotatedBuffer, { caption: 'Ancaman terdeteksi. ini adalah fotonya' });
+
+  // Log current stats
+  const stats = getPhotoStats();
+  console.log('=== SECURITY PHOTO STATS ===');
+  console.log(`Total Size: ${stats.totalSizeKB} KB (${stats.totalSizeMB} MB)`);
+  console.log(`Total Transactions: ${stats.totalTransactions}`);
+  console.log(`Average Size: ${stats.averageSizeKB} KB per photo`);
+  console.log('============================');
 }
 
 module.exports = { sendSecurityPhotoToTelegram };
+// const sharp = require('sharp');
+
+// // Pastikan bot dan chatId di-import atau di-passing ke fungsi ini
+
+// // Fungsi murni untuk kirim foto ke Telegram
+// async function sendSecurityPhotoToTelegram(buffer, bot, chatId) {
+//   // Putar 180 derajat menggunakan sharp
+//   const rotatedBuffer = await sharp(buffer)
+//     .rotate(180)
+//     .jpeg({ quality: 80 })
+//     .toBuffer();
+
+//   // Kirim ke Telegram
+//   await bot.sendPhoto(chatId, rotatedBuffer, { caption: 'Ancaman terdeteksi. ini adalah fotonya' });
+// }
+
+// module.exports = { sendSecurityPhotoToTelegram };
 // const fs = require('fs');
 // const path = require('path');
 
